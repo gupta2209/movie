@@ -1,0 +1,881 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<html lang="en">
+<head><link rel="icon" href="../../daikon-favicon.png" type="image/png"/>
+<title>Source code</title>
+<link rel="stylesheet" type="text/css" href="../../stylesheet.css" title="Style">
+</head>
+<body>
+<div class="sourceContainer">
+<pre><span class="sourceLineNo">001</span>package daikon;<a name="line.1"></a>
+<span class="sourceLineNo">002</span><a name="line.2"></a>
+<span class="sourceLineNo">003</span>import java.io.LineNumberReader;<a name="line.3"></a>
+<span class="sourceLineNo">004</span>import java.io.ObjectStreamException;<a name="line.4"></a>
+<span class="sourceLineNo">005</span>import java.io.Serializable;<a name="line.5"></a>
+<span class="sourceLineNo">006</span>import java.io.StreamTokenizer;<a name="line.6"></a>
+<span class="sourceLineNo">007</span>import java.io.StringReader;<a name="line.7"></a>
+<span class="sourceLineNo">008</span>import java.util.ArrayList;<a name="line.8"></a>
+<span class="sourceLineNo">009</span>import java.util.HashMap;<a name="line.9"></a>
+<span class="sourceLineNo">010</span>import java.util.HashSet;<a name="line.10"></a>
+<span class="sourceLineNo">011</span>import java.util.LinkedHashSet;<a name="line.11"></a>
+<span class="sourceLineNo">012</span>import java.util.List;<a name="line.12"></a>
+<span class="sourceLineNo">013</span>import org.checkerframework.checker.interning.qual.Interned;<a name="line.13"></a>
+<span class="sourceLineNo">014</span>import org.checkerframework.checker.lock.qual.GuardSatisfied;<a name="line.14"></a>
+<span class="sourceLineNo">015</span>import org.checkerframework.checker.nullness.qual.Nullable;<a name="line.15"></a>
+<span class="sourceLineNo">016</span>import org.checkerframework.dataflow.qual.Pure;<a name="line.16"></a>
+<span class="sourceLineNo">017</span>import org.checkerframework.dataflow.qual.SideEffectFree;<a name="line.17"></a>
+<span class="sourceLineNo">018</span>import org.plumelib.util.Intern;<a name="line.18"></a>
+<span class="sourceLineNo">019</span>import org.plumelib.util.UtilPlume;<a name="line.19"></a>
+<span class="sourceLineNo">020</span><a name="line.20"></a>
+<span class="sourceLineNo">021</span>/**<a name="line.21"></a>
+<span class="sourceLineNo">022</span> * Represents the type of a variable, for its declared type, dtrace file representation, and<a name="line.22"></a>
+<span class="sourceLineNo">023</span> * internal representations. ProgLangTypes are interned, so they can be == compared.<a name="line.23"></a>
+<span class="sourceLineNo">024</span> */<a name="line.24"></a>
+<span class="sourceLineNo">025</span><a name="line.25"></a>
+<span class="sourceLineNo">026</span>// I could also consider using Class; however:<a name="line.26"></a>
+<span class="sourceLineNo">027</span>//  * that ties this to a Java front end, as Class can't represent types of<a name="line.27"></a>
+<span class="sourceLineNo">028</span>//    (say) C variables.  (not a compelling problem)<a name="line.28"></a>
+<span class="sourceLineNo">029</span>//  * that loads the class, which requies that all classes available at<a name="line.29"></a>
+<span class="sourceLineNo">030</span>//    runtime be available at inference time.  (not a compelling problem)<a name="line.30"></a>
+<span class="sourceLineNo">031</span>//  * Class does not represent inheritance (but I can do that myself);<a name="line.31"></a>
+<span class="sourceLineNo">032</span>//    and see isAssignableFrom, which might do all I need.<a name="line.32"></a>
+<span class="sourceLineNo">033</span>//  * Class has no "dimensions" field.  isArray() exists, however, as does<a name="line.33"></a>
+<span class="sourceLineNo">034</span>//    getComponentType().  I can always determine the number of dimensions<a name="line.34"></a>
+<span class="sourceLineNo">035</span>//    from the number of leading "[" in the name, and dimensions is only<a name="line.35"></a>
+<span class="sourceLineNo">036</span>//    really needed for parse_value.  parse_value can do literal checks and<a name="line.36"></a>
+<span class="sourceLineNo">037</span>//    elementType() can use the name, I suppose.  Or maybe try to<a name="line.37"></a>
+<span class="sourceLineNo">038</span>//    instantiate something, though that seems dicier.<a name="line.38"></a>
+<span class="sourceLineNo">039</span><a name="line.39"></a>
+<span class="sourceLineNo">040</span>// Problem:  this doesn't currently represent inheritance, coercability, or<a name="line.40"></a>
+<span class="sourceLineNo">041</span>// other relationships over the base types.<a name="line.41"></a>
+<span class="sourceLineNo">042</span><a name="line.42"></a>
+<span class="sourceLineNo">043</span>// integral_types = ("int", "char", "float", "double", "integral", "boolean")<a name="line.43"></a>
+<span class="sourceLineNo">044</span>// known_types = integral_types + ("pointer", "address")<a name="line.44"></a>
+<span class="sourceLineNo">045</span><a name="line.45"></a>
+<span class="sourceLineNo">046</span>public final @Interned class ProglangType implements Serializable {<a name="line.46"></a>
+<span class="sourceLineNo">047</span>  // We are Serializable, so we specify a version to allow changes to<a name="line.47"></a>
+<span class="sourceLineNo">048</span>  // method signatures without breaking serialization.  If you add or<a name="line.48"></a>
+<span class="sourceLineNo">049</span>  // remove fields, you should change this number to the current date.<a name="line.49"></a>
+<span class="sourceLineNo">050</span>  static final long serialVersionUID = 20020122L;<a name="line.50"></a>
+<span class="sourceLineNo">051</span><a name="line.51"></a>
+<span class="sourceLineNo">052</span>  /** Maps from a base type name to its ProglangTypes and arrays with that base. */<a name="line.52"></a>
+<span class="sourceLineNo">053</span>  private static HashMap&lt;@Interned String, List&lt;ProglangType&gt;&gt; all_known_types = new HashMap&lt;&gt;();<a name="line.53"></a>
+<span class="sourceLineNo">054</span><a name="line.54"></a>
+<span class="sourceLineNo">055</span>  /**<a name="line.55"></a>
+<span class="sourceLineNo">056</span>   * The set of (interned) names of classes that implement java.util.List. For a Java class, this is<a name="line.56"></a>
+<span class="sourceLineNo">057</span>   * a {@code @BinaryName}, but when Daikon is processing programs written in other languages, it<a name="line.57"></a>
+<span class="sourceLineNo">058</span>   * can be arbitrary.<a name="line.58"></a>
+<span class="sourceLineNo">059</span>   */<a name="line.59"></a>
+<span class="sourceLineNo">060</span>  public static HashSet&lt;String&gt; list_implementors = new LinkedHashSet&lt;&gt;();<a name="line.60"></a>
+<span class="sourceLineNo">061</span><a name="line.61"></a>
+<span class="sourceLineNo">062</span>  /**<a name="line.62"></a>
+<span class="sourceLineNo">063</span>   * If true, treat 32 bit values whose high bit is on, as a negative number (rather than as a 32<a name="line.63"></a>
+<span class="sourceLineNo">064</span>   * bit unsigned).<a name="line.64"></a>
+<span class="sourceLineNo">065</span>   */<a name="line.65"></a>
+<span class="sourceLineNo">066</span>  public static boolean dkconfig_convert_to_signed = false;<a name="line.66"></a>
+<span class="sourceLineNo">067</span><a name="line.67"></a>
+<span class="sourceLineNo">068</span>  static {<a name="line.68"></a>
+<span class="sourceLineNo">069</span>    // XXX for now, hard-code these list-implementing types. We should<a name="line.69"></a>
+<span class="sourceLineNo">070</span>    // make the front-end dump the language-specific ones into .decls.<a name="line.70"></a>
+<span class="sourceLineNo">071</span>    list_implementors.add("java.util.List");<a name="line.71"></a>
+<span class="sourceLineNo">072</span>    list_implementors.add("java.util.AbstractList");<a name="line.72"></a>
+<span class="sourceLineNo">073</span>    list_implementors.add("java.util.Vector");<a name="line.73"></a>
+<span class="sourceLineNo">074</span>    list_implementors.add("java.util.ArrayList");<a name="line.74"></a>
+<span class="sourceLineNo">075</span>    list_implementors.add("java.util.AbstractSequentialList");<a name="line.75"></a>
+<span class="sourceLineNo">076</span>    list_implementors.add("java.util.LinkedList");<a name="line.76"></a>
+<span class="sourceLineNo">077</span>    list_implementors.add("java.util.Stack");<a name="line.77"></a>
+<span class="sourceLineNo">078</span>  }<a name="line.78"></a>
+<span class="sourceLineNo">079</span><a name="line.79"></a>
+<span class="sourceLineNo">080</span>  // For a Java class, this is a binary name.  When Daikon is processing<a name="line.80"></a>
+<span class="sourceLineNo">081</span>  // other languages, the format is arbitrary.<a name="line.81"></a>
+<span class="sourceLineNo">082</span>  private @Interned String base; // interned name of base type<a name="line.82"></a>
+<span class="sourceLineNo">083</span><a name="line.83"></a>
+<span class="sourceLineNo">084</span>  public @Interned String base() {<a name="line.84"></a>
+<span class="sourceLineNo">085</span>    return base;<a name="line.85"></a>
+<span class="sourceLineNo">086</span>  }<a name="line.86"></a>
+<span class="sourceLineNo">087</span><a name="line.87"></a>
+<span class="sourceLineNo">088</span>  /** Number of dimensions. Zero for a non-array. */<a name="line.88"></a>
+<span class="sourceLineNo">089</span>  private int dimensions;<a name="line.89"></a>
+<span class="sourceLineNo">090</span><a name="line.90"></a>
+<span class="sourceLineNo">091</span>  /**<a name="line.91"></a>
+<span class="sourceLineNo">092</span>   * Return the number of dimensions (zero for a non-array).<a name="line.92"></a>
+<span class="sourceLineNo">093</span>   *<a name="line.93"></a>
+<span class="sourceLineNo">094</span>   * @return the number of dimensions<a name="line.94"></a>
+<span class="sourceLineNo">095</span>   */<a name="line.95"></a>
+<span class="sourceLineNo">096</span>  public int dimensions() {<a name="line.96"></a>
+<span class="sourceLineNo">097</span>    return dimensions;<a name="line.97"></a>
+<span class="sourceLineNo">098</span>  }<a name="line.98"></a>
+<span class="sourceLineNo">099</span><a name="line.99"></a>
+<span class="sourceLineNo">100</span>  @Pure<a name="line.100"></a>
+<span class="sourceLineNo">101</span>  public boolean isArray() {<a name="line.101"></a>
+<span class="sourceLineNo">102</span>    return dimensions &gt; 0;<a name="line.102"></a>
+<span class="sourceLineNo">103</span>  }<a name="line.103"></a>
+<span class="sourceLineNo">104</span><a name="line.104"></a>
+<span class="sourceLineNo">105</span>  /**<a name="line.105"></a>
+<span class="sourceLineNo">106</span>   * No public constructor: use parse() instead to get a canonical representation. basetype should<a name="line.106"></a>
+<span class="sourceLineNo">107</span>   * be interned.<a name="line.107"></a>
+<span class="sourceLineNo">108</span>   */<a name="line.108"></a>
+<span class="sourceLineNo">109</span>  @SuppressWarnings("super.invocation.invalid") // never called twice with the same arguments<a name="line.109"></a>
+<span class="sourceLineNo">110</span>  private ProglangType(@Interned String basetype, int dimensions) {<a name="line.110"></a>
+<span class="sourceLineNo">111</span>    assert basetype == basetype.intern();<a name="line.111"></a>
+<span class="sourceLineNo">112</span>    this.base = basetype;<a name="line.112"></a>
+<span class="sourceLineNo">113</span>    this.dimensions = dimensions;<a name="line.113"></a>
+<span class="sourceLineNo">114</span>  }<a name="line.114"></a>
+<span class="sourceLineNo">115</span><a name="line.115"></a>
+<span class="sourceLineNo">116</span>  /**<a name="line.116"></a>
+<span class="sourceLineNo">117</span>   * This can't be a constructor because it returns a canonical representation (that can be compared<a name="line.117"></a>
+<span class="sourceLineNo">118</span>   * with ==), not necessarily a new object.<a name="line.118"></a>
+<span class="sourceLineNo">119</span>   *<a name="line.119"></a>
+<span class="sourceLineNo">120</span>   * @param rep the name of the type, optionally suffixed by (possibly multiple) "[]"<a name="line.120"></a>
+<span class="sourceLineNo">121</span>   */<a name="line.121"></a>
+<span class="sourceLineNo">122</span>  public static ProglangType parse(String rep) {<a name="line.122"></a>
+<span class="sourceLineNo">123</span>    String new_base = rep;<a name="line.123"></a>
+<span class="sourceLineNo">124</span>    int dims = 0;<a name="line.124"></a>
+<span class="sourceLineNo">125</span>    while (new_base.endsWith("[]")) {<a name="line.125"></a>
+<span class="sourceLineNo">126</span>      dims++;<a name="line.126"></a>
+<span class="sourceLineNo">127</span>      new_base = new_base.substring(0, new_base.length() - 2);<a name="line.127"></a>
+<span class="sourceLineNo">128</span>    }<a name="line.128"></a>
+<span class="sourceLineNo">129</span>    return intern(new_base.intern(), dims);<a name="line.129"></a>
+<span class="sourceLineNo">130</span>  }<a name="line.130"></a>
+<span class="sourceLineNo">131</span><a name="line.131"></a>
+<span class="sourceLineNo">132</span>  /**<a name="line.132"></a>
+<span class="sourceLineNo">133</span>   * Like parse, but normalizes representation types (such as converting "float" to "double"), in<a name="line.133"></a>
+<span class="sourceLineNo">134</span>   * order to return real file representation types even if the file contains something slightly<a name="line.134"></a>
+<span class="sourceLineNo">135</span>   * different than the prescribed format.<a name="line.135"></a>
+<span class="sourceLineNo">136</span>   */<a name="line.136"></a>
+<span class="sourceLineNo">137</span>  public static ProglangType rep_parse(String rep) {<a name="line.137"></a>
+<span class="sourceLineNo">138</span>    ProglangType candidate = parse(rep);<a name="line.138"></a>
+<span class="sourceLineNo">139</span>    if ((candidate.base == "address") || (candidate.base == "pointer")) { // interned<a name="line.139"></a>
+<span class="sourceLineNo">140</span>      return intern("hashcode", candidate.dimensions);<a name="line.140"></a>
+<span class="sourceLineNo">141</span>    } else if (candidate.base == "float") { // interned<a name="line.141"></a>
+<span class="sourceLineNo">142</span>      return intern("double", candidate.dimensions);<a name="line.142"></a>
+<span class="sourceLineNo">143</span>    } else if (candidate.base == "string") { // interned<a name="line.143"></a>
+<span class="sourceLineNo">144</span>      return intern("java.lang.String", candidate.dimensions);<a name="line.144"></a>
+<span class="sourceLineNo">145</span>    } else {<a name="line.145"></a>
+<span class="sourceLineNo">146</span>      return candidate;<a name="line.146"></a>
+<span class="sourceLineNo">147</span>    }<a name="line.147"></a>
+<span class="sourceLineNo">148</span>  }<a name="line.148"></a>
+<span class="sourceLineNo">149</span><a name="line.149"></a>
+<span class="sourceLineNo">150</span>  /** Convert a file representation type to an internal representation type. */<a name="line.150"></a>
+<span class="sourceLineNo">151</span>  public ProglangType fileTypeToRepType() {<a name="line.151"></a>
+<span class="sourceLineNo">152</span>    if ((base == BASE_HASHCODE)<a name="line.152"></a>
+<span class="sourceLineNo">153</span>        || (base == BASE_BOOLEAN)<a name="line.153"></a>
+<span class="sourceLineNo">154</span>        || (base == BASE_LONG)<a name="line.154"></a>
+<span class="sourceLineNo">155</span>        || (base == BASE_LONG_LONG)<a name="line.155"></a>
+<span class="sourceLineNo">156</span>        || (base == BASE_SHORT)) {<a name="line.156"></a>
+<span class="sourceLineNo">157</span>      return intern(BASE_INT, dimensions);<a name="line.157"></a>
+<span class="sourceLineNo">158</span>    }<a name="line.158"></a>
+<span class="sourceLineNo">159</span>    return this;<a name="line.159"></a>
+<span class="sourceLineNo">160</span>  }<a name="line.160"></a>
+<span class="sourceLineNo">161</span><a name="line.161"></a>
+<span class="sourceLineNo">162</span>  /**<a name="line.162"></a>
+<span class="sourceLineNo">163</span>   * For serialization; indicates which object to return instead of the one that was just read from<a name="line.163"></a>
+<span class="sourceLineNo">164</span>   * the file. This obviates the need to write a readObject method that interns the interned fields<a name="line.164"></a>
+<span class="sourceLineNo">165</span>   * (just "base").<a name="line.165"></a>
+<span class="sourceLineNo">166</span>   */<a name="line.166"></a>
+<span class="sourceLineNo">167</span>  public Object readResolve() throws ObjectStreamException {<a name="line.167"></a>
+<span class="sourceLineNo">168</span>    return intern(base.intern(), dimensions);<a name="line.168"></a>
+<span class="sourceLineNo">169</span>  }<a name="line.169"></a>
+<span class="sourceLineNo">170</span><a name="line.170"></a>
+<span class="sourceLineNo">171</span>  // Is this necessary?  It will be inherited from Object.<a name="line.171"></a>
+<span class="sourceLineNo">172</span>  // @EnsuresNonNullIf(result=true, expression="#1")<a name="line.172"></a>
+<span class="sourceLineNo">173</span>  // public boolean equals(@Nullable Object o) {<a name="line.173"></a>
+<span class="sourceLineNo">174</span>  //   return this == o;<a name="line.174"></a>
+<span class="sourceLineNo">175</span>  // }<a name="line.175"></a>
+<span class="sourceLineNo">176</span><a name="line.176"></a>
+<span class="sourceLineNo">177</span>  // THIS CODE IS A HOT SPOT (~33% of runtime) [as of January 2002].<a name="line.177"></a>
+<span class="sourceLineNo">178</span>  /** @param t_base must be interned */<a name="line.178"></a>
+<span class="sourceLineNo">179</span>  private static @Nullable ProglangType find(@Interned String t_base, int t_dims) {<a name="line.179"></a>
+<span class="sourceLineNo">180</span>    // Disabled for performance reasons! this assertion is sound though:<a name="line.180"></a>
+<span class="sourceLineNo">181</span>    //    assert t_base == t_base.intern();<a name="line.181"></a>
+<span class="sourceLineNo">182</span><a name="line.182"></a>
+<span class="sourceLineNo">183</span>    // the string maps us to a vec of all ProglangTypes with that base<a name="line.183"></a>
+<span class="sourceLineNo">184</span>    List&lt;ProglangType&gt; v = all_known_types.get(t_base);<a name="line.184"></a>
+<span class="sourceLineNo">185</span>    if (v == null) {<a name="line.185"></a>
+<span class="sourceLineNo">186</span>      return null;<a name="line.186"></a>
+<span class="sourceLineNo">187</span>    }<a name="line.187"></a>
+<span class="sourceLineNo">188</span><a name="line.188"></a>
+<span class="sourceLineNo">189</span>    // now search for the right dimension<a name="line.189"></a>
+<span class="sourceLineNo">190</span>    for (ProglangType candidate : v) {<a name="line.190"></a>
+<span class="sourceLineNo">191</span>      if (candidate.dimensions() == t_dims) {<a name="line.191"></a>
+<span class="sourceLineNo">192</span>        return candidate;<a name="line.192"></a>
+<span class="sourceLineNo">193</span>      }<a name="line.193"></a>
+<span class="sourceLineNo">194</span>    }<a name="line.194"></a>
+<span class="sourceLineNo">195</span><a name="line.195"></a>
+<span class="sourceLineNo">196</span>    return null;<a name="line.196"></a>
+<span class="sourceLineNo">197</span>  }<a name="line.197"></a>
+<span class="sourceLineNo">198</span><a name="line.198"></a>
+<span class="sourceLineNo">199</span>  // private ProglangType intern() {<a name="line.199"></a>
+<span class="sourceLineNo">200</span>  //   return ProglangType.intern(this);<a name="line.200"></a>
+<span class="sourceLineNo">201</span>  // }<a name="line.201"></a>
+<span class="sourceLineNo">202</span><a name="line.202"></a>
+<span class="sourceLineNo">203</span>  // We shouldn't even get to the point of interning; we should not<a name="line.203"></a>
+<span class="sourceLineNo">204</span>  // have created the ProglangType if it isn't canonical.<a name="line.204"></a>
+<span class="sourceLineNo">205</span>  // private static ProglangType intern(ProglangType t) {<a name="line.205"></a>
+<span class="sourceLineNo">206</span>  //   ProglangType candidate = find(t.base, t.dimensions);<a name="line.206"></a>
+<span class="sourceLineNo">207</span>  //   if (candidate != null)<a name="line.207"></a>
+<span class="sourceLineNo">208</span>  //     return candidate;<a name="line.208"></a>
+<span class="sourceLineNo">209</span>  //   all_known_types.add(t);<a name="line.209"></a>
+<span class="sourceLineNo">210</span>  //   return t;<a name="line.210"></a>
+<span class="sourceLineNo">211</span>  // }<a name="line.211"></a>
+<span class="sourceLineNo">212</span><a name="line.212"></a>
+<span class="sourceLineNo">213</span>  private static ProglangType intern(@Interned String t_base, int t_dims) {<a name="line.213"></a>
+<span class="sourceLineNo">214</span>    // Disabled for performance reasons! this assertion is sound though:<a name="line.214"></a>
+<span class="sourceLineNo">215</span>    //    assert t_base == t_base.intern();<a name="line.215"></a>
+<span class="sourceLineNo">216</span>    ProglangType existing = find(t_base, t_dims);<a name="line.216"></a>
+<span class="sourceLineNo">217</span>    if (existing != null) {<a name="line.217"></a>
+<span class="sourceLineNo">218</span>      return existing;<a name="line.218"></a>
+<span class="sourceLineNo">219</span>    }<a name="line.219"></a>
+<span class="sourceLineNo">220</span>    @SuppressWarnings("interning") // test above did not find one, so the new one is interned<a name="line.220"></a>
+<span class="sourceLineNo">221</span>    @Interned ProglangType result = new ProglangType(t_base, t_dims);<a name="line.221"></a>
+<span class="sourceLineNo">222</span><a name="line.222"></a>
+<span class="sourceLineNo">223</span>    List&lt;ProglangType&gt; v = all_known_types.get(t_base);<a name="line.223"></a>
+<span class="sourceLineNo">224</span>    if (v == null) {<a name="line.224"></a>
+<span class="sourceLineNo">225</span>      v = new ArrayList&lt;ProglangType&gt;();<a name="line.225"></a>
+<span class="sourceLineNo">226</span>      all_known_types.put(t_base, v);<a name="line.226"></a>
+<span class="sourceLineNo">227</span>    }<a name="line.227"></a>
+<span class="sourceLineNo">228</span><a name="line.228"></a>
+<span class="sourceLineNo">229</span>    v.add(result);<a name="line.229"></a>
+<span class="sourceLineNo">230</span><a name="line.230"></a>
+<span class="sourceLineNo">231</span>    return result;<a name="line.231"></a>
+<span class="sourceLineNo">232</span>  }<a name="line.232"></a>
+<span class="sourceLineNo">233</span><a name="line.233"></a>
+<span class="sourceLineNo">234</span>  /**<a name="line.234"></a>
+<span class="sourceLineNo">235</span>   * Returns the type of elements of this. They may themselves be arrays if this is<a name="line.235"></a>
+<span class="sourceLineNo">236</span>   * multidimensional.<a name="line.236"></a>
+<span class="sourceLineNo">237</span>   */<a name="line.237"></a>
+<span class="sourceLineNo">238</span>  public ProglangType elementType(@GuardSatisfied ProglangType this) {<a name="line.238"></a>
+<span class="sourceLineNo">239</span>    // Presume that if there are no dimensions, this must be a list of<a name="line.239"></a>
+<span class="sourceLineNo">240</span>    // objects.  Callers should really find this out from other information<a name="line.240"></a>
+<span class="sourceLineNo">241</span>    // in the variable, but this will old code that relied on the pseudo<a name="line.241"></a>
+<span class="sourceLineNo">242</span>    // dimensions of lists to work<a name="line.242"></a>
+<span class="sourceLineNo">243</span>    if (dimensions == 0) {<a name="line.243"></a>
+<span class="sourceLineNo">244</span>      return OBJECT;<a name="line.244"></a>
+<span class="sourceLineNo">245</span>    }<a name="line.245"></a>
+<span class="sourceLineNo">246</span>    assert base == base.intern() : "Uninterned base " + base;<a name="line.246"></a>
+<span class="sourceLineNo">247</span>    return ProglangType.intern(base, dimensions - 1);<a name="line.247"></a>
+<span class="sourceLineNo">248</span>  }<a name="line.248"></a>
+<span class="sourceLineNo">249</span><a name="line.249"></a>
+<span class="sourceLineNo">250</span>  // All these variables are public because the way to check the base of an<a name="line.250"></a>
+<span class="sourceLineNo">251</span>  // array is type.base() == ProglangType.BASE_CHAR.<a name="line.251"></a>
+<span class="sourceLineNo">252</span><a name="line.252"></a>
+<span class="sourceLineNo">253</span>  // Primitive types<a name="line.253"></a>
+<span class="sourceLineNo">254</span>  static final @Interned String BASE_BOOLEAN = "boolean";<a name="line.254"></a>
+<span class="sourceLineNo">255</span>  static final @Interned String BASE_BYTE = "byte";<a name="line.255"></a>
+<span class="sourceLineNo">256</span>  static final @Interned String BASE_CHAR = "char";<a name="line.256"></a>
+<span class="sourceLineNo">257</span>  static final @Interned String BASE_DOUBLE = "double";<a name="line.257"></a>
+<span class="sourceLineNo">258</span>  static final @Interned String BASE_FLOAT = "float";<a name="line.258"></a>
+<span class="sourceLineNo">259</span>  static final @Interned String BASE_INT = "int";<a name="line.259"></a>
+<span class="sourceLineNo">260</span>  static final @Interned String BASE_LONG = "long";<a name="line.260"></a>
+<span class="sourceLineNo">261</span>  static final @Interned String BASE_LONG_LONG = "long long int";<a name="line.261"></a>
+<span class="sourceLineNo">262</span>  static final @Interned String BASE_SHORT = "short";<a name="line.262"></a>
+<span class="sourceLineNo">263</span><a name="line.263"></a>
+<span class="sourceLineNo">264</span>  // Nonprimitive types<a name="line.264"></a>
+<span class="sourceLineNo">265</span>  static final @Interned String BASE_OBJECT = "java.lang.Object";<a name="line.265"></a>
+<span class="sourceLineNo">266</span>  static final @Interned String BASE_STRING = "java.lang.String";<a name="line.266"></a>
+<span class="sourceLineNo">267</span>  static final @Interned String BASE_INTEGER = "java.lang.Integer";<a name="line.267"></a>
+<span class="sourceLineNo">268</span>  // "hashcode", "address", and "pointer" are identical;<a name="line.268"></a>
+<span class="sourceLineNo">269</span>  // "hashcode" is preferred.<a name="line.269"></a>
+<span class="sourceLineNo">270</span>  static final @Interned String BASE_HASHCODE = "hashcode";<a name="line.270"></a>
+<span class="sourceLineNo">271</span>  // static final @Interned String BASE_ADDRESS = "address";<a name="line.271"></a>
+<span class="sourceLineNo">272</span>  // static final @Interned String BASE_POINTER = "pointer";<a name="line.272"></a>
+<span class="sourceLineNo">273</span><a name="line.273"></a>
+<span class="sourceLineNo">274</span>  // avoid duplicate allocations<a name="line.274"></a>
+<span class="sourceLineNo">275</span>  // No need for the Integer versions; use Long instead.<a name="line.275"></a>
+<span class="sourceLineNo">276</span>  // static final @Interned Integer IntegerZero = Intern.internedInteger(0);<a name="line.276"></a>
+<span class="sourceLineNo">277</span>  // static final @Interned Integer IntegerOne = Intern.internedInteger(1);<a name="line.277"></a>
+<span class="sourceLineNo">278</span>  static final @Interned Long LongZero = Intern.internedLong(0);<a name="line.278"></a>
+<span class="sourceLineNo">279</span>  static final @Interned Long LongOne = Intern.internedLong(1);<a name="line.279"></a>
+<span class="sourceLineNo">280</span>  static final @Interned Double DoubleZero = Intern.internedDouble(0);<a name="line.280"></a>
+<span class="sourceLineNo">281</span>  static final @Interned Double DoubleNaN = Intern.internedDouble(Double.NaN);<a name="line.281"></a>
+<span class="sourceLineNo">282</span>  static final @Interned Double DoublePositiveInfinity =<a name="line.282"></a>
+<span class="sourceLineNo">283</span>      Intern.internedDouble(Double.POSITIVE_INFINITY);<a name="line.283"></a>
+<span class="sourceLineNo">284</span>  static final @Interned Double DoubleNegativeInfinity =<a name="line.284"></a>
+<span class="sourceLineNo">285</span>      Intern.internedDouble(Double.NEGATIVE_INFINITY);<a name="line.285"></a>
+<span class="sourceLineNo">286</span><a name="line.286"></a>
+<span class="sourceLineNo">287</span>  /*<a name="line.287"></a>
+<span class="sourceLineNo">288</span>   *  Now that all other static initialisers are done, it is safe to<a name="line.288"></a>
+<span class="sourceLineNo">289</span>   *  construct some instances, also statically.  Note that these are<a name="line.289"></a>
+<span class="sourceLineNo">290</span>   *  down here to delay their instantiation until after we have<a name="line.290"></a>
+<span class="sourceLineNo">291</span>   *  created (e.g.) the list_implementors object, etc.  */<a name="line.291"></a>
+<span class="sourceLineNo">292</span><a name="line.292"></a>
+<span class="sourceLineNo">293</span>  // Use == to compare, because ProglangType objects are interned.<a name="line.293"></a>
+<span class="sourceLineNo">294</span>  public static final ProglangType INT = ProglangType.intern("int", 0);<a name="line.294"></a>
+<span class="sourceLineNo">295</span>  public static final ProglangType LONG_PRIMITIVE = ProglangType.intern("long", 0);<a name="line.295"></a>
+<span class="sourceLineNo">296</span>  public static final ProglangType DOUBLE = ProglangType.intern("double", 0);<a name="line.296"></a>
+<span class="sourceLineNo">297</span>  public static final ProglangType CHAR = ProglangType.intern("char", 0);<a name="line.297"></a>
+<span class="sourceLineNo">298</span>  public static final ProglangType STRING = ProglangType.intern("java.lang.String", 0);<a name="line.298"></a>
+<span class="sourceLineNo">299</span>  public static final ProglangType INT_ARRAY = ProglangType.intern("int", 1);<a name="line.299"></a>
+<span class="sourceLineNo">300</span>  public static final ProglangType LONG_PRIMITIVE_ARRAY = ProglangType.intern("long", 1);<a name="line.300"></a>
+<span class="sourceLineNo">301</span>  public static final ProglangType DOUBLE_ARRAY = ProglangType.intern("double", 1);<a name="line.301"></a>
+<span class="sourceLineNo">302</span>  public static final ProglangType CHAR_ARRAY = ProglangType.intern("char", 1);<a name="line.302"></a>
+<span class="sourceLineNo">303</span>  public static final ProglangType STRING_ARRAY = ProglangType.intern("java.lang.String", 1);<a name="line.303"></a>
+<span class="sourceLineNo">304</span>  public static final ProglangType CHAR_ARRAY_ARRAY = ProglangType.intern("char", 2);<a name="line.304"></a>
+<span class="sourceLineNo">305</span><a name="line.305"></a>
+<span class="sourceLineNo">306</span>  public static final ProglangType INTEGER = ProglangType.intern("java.lang.Integer", 0);<a name="line.306"></a>
+<span class="sourceLineNo">307</span>  public static final ProglangType LONG_OBJECT = ProglangType.intern("java.lang.Long", 0);<a name="line.307"></a>
+<span class="sourceLineNo">308</span><a name="line.308"></a>
+<span class="sourceLineNo">309</span>  public static final ProglangType OBJECT = ProglangType.intern("java.lang.Object", 0);<a name="line.309"></a>
+<span class="sourceLineNo">310</span><a name="line.310"></a>
+<span class="sourceLineNo">311</span>  public static final ProglangType BOOLEAN = ProglangType.intern("boolean", 0);<a name="line.311"></a>
+<span class="sourceLineNo">312</span>  public static final ProglangType HASHCODE = ProglangType.intern("hashcode", 0);<a name="line.312"></a>
+<span class="sourceLineNo">313</span>  public static final ProglangType BOOLEAN_ARRAY = ProglangType.intern("boolean", 1);<a name="line.313"></a>
+<span class="sourceLineNo">314</span>  public static final ProglangType HASHCODE_ARRAY = ProglangType.intern("hashcode", 1);<a name="line.314"></a>
+<span class="sourceLineNo">315</span><a name="line.315"></a>
+<span class="sourceLineNo">316</span>  /**<a name="line.316"></a>
+<span class="sourceLineNo">317</span>   * Like Long.parseLong(), but transform large unsigned longs (as from C's unsigned long long) into<a name="line.317"></a>
+<span class="sourceLineNo">318</span>   * the corresponding negative Java longs. Also handles hex values that begin with 0x.<a name="line.318"></a>
+<span class="sourceLineNo">319</span>   */<a name="line.319"></a>
+<span class="sourceLineNo">320</span>  @SuppressWarnings("ConstantOverflow")<a name="line.320"></a>
+<span class="sourceLineNo">321</span>  private static long myParseLong(String value) {<a name="line.321"></a>
+<span class="sourceLineNo">322</span>    if ((value.length() == 20 &amp;&amp; value.charAt(0) == '1')<a name="line.322"></a>
+<span class="sourceLineNo">323</span>        || (value.length() == 19<a name="line.323"></a>
+<span class="sourceLineNo">324</span>            &amp;&amp; value.charAt(0) == '9'<a name="line.324"></a>
+<span class="sourceLineNo">325</span>            &amp;&amp; value.compareTo("9223372036854775808") &gt;= 0)) {<a name="line.325"></a>
+<span class="sourceLineNo">326</span>      // Oops, we got a large unsigned long, which Java, having<a name="line.326"></a>
+<span class="sourceLineNo">327</span>      // only signed longs, will refuse to parse. We'll have to<a name="line.327"></a>
+<span class="sourceLineNo">328</span>      // turn it into the corresponding negative long value.<a name="line.328"></a>
+<span class="sourceLineNo">329</span>      String rest; // A substring that will be a valid positive long<a name="line.329"></a>
+<span class="sourceLineNo">330</span>      long subtracted; // The amount we effectively subtracted to make it<a name="line.330"></a>
+<span class="sourceLineNo">331</span>      if (value.length() == 20) {<a name="line.331"></a>
+<span class="sourceLineNo">332</span>        rest = value.substring(1);<a name="line.332"></a>
+<span class="sourceLineNo">333</span>        subtracted = 100000L * 100000 * 100000 * 10000; // 10^19; overflows<a name="line.333"></a>
+<span class="sourceLineNo">334</span>      } else {<a name="line.334"></a>
+<span class="sourceLineNo">335</span>        rest = value.substring(1);<a name="line.335"></a>
+<span class="sourceLineNo">336</span>        subtracted = 9L * 100000 * 100000 * 100000 * 1000; // 9*10^18<a name="line.336"></a>
+<span class="sourceLineNo">337</span>      }<a name="line.337"></a>
+<span class="sourceLineNo">338</span>      return Long.parseLong(rest) + subtracted;<a name="line.338"></a>
+<span class="sourceLineNo">339</span>    } else {<a name="line.339"></a>
+<span class="sourceLineNo">340</span>      long val;<a name="line.340"></a>
+<span class="sourceLineNo">341</span>      if ((value.length() &gt; 2) &amp;&amp; (value.charAt(0) == '0') &amp;&amp; (value.charAt(1) == 'x')) {<a name="line.341"></a>
+<span class="sourceLineNo">342</span>        val = Long.parseLong(value.substring(2), 16);<a name="line.342"></a>
+<span class="sourceLineNo">343</span>      } else {<a name="line.343"></a>
+<span class="sourceLineNo">344</span>        val = Long.parseLong(value);<a name="line.344"></a>
+<span class="sourceLineNo">345</span>      }<a name="line.345"></a>
+<span class="sourceLineNo">346</span>      // presume that 32 bit values are signed<a name="line.346"></a>
+<span class="sourceLineNo">347</span>      if (dkconfig_convert_to_signed<a name="line.347"></a>
+<span class="sourceLineNo">348</span>          &amp;&amp; (((val &amp; 0x80000000L) == 0x80000000L) &amp;&amp; ((val &amp; 0xFFFFFFFF00000000L) == 0))) {<a name="line.348"></a>
+<span class="sourceLineNo">349</span>        // long orig = val;<a name="line.349"></a>
+<span class="sourceLineNo">350</span>        val |= 0xFFFFFFFF00000000L;<a name="line.350"></a>
+<span class="sourceLineNo">351</span>        // System.out.printf("Warning: converted %d to %d%n", orig, val);<a name="line.351"></a>
+<span class="sourceLineNo">352</span>      }<a name="line.352"></a>
+<span class="sourceLineNo">353</span>      return val;<a name="line.353"></a>
+<span class="sourceLineNo">354</span>    }<a name="line.354"></a>
+<span class="sourceLineNo">355</span>  }<a name="line.355"></a>
+<span class="sourceLineNo">356</span><a name="line.356"></a>
+<span class="sourceLineNo">357</span>  /**<a name="line.357"></a>
+<span class="sourceLineNo">358</span>   * Given a string representation of a value (of the type represented by this ProglangType), return<a name="line.358"></a>
+<span class="sourceLineNo">359</span>   * the (canonicalized) interpretation of that value.<a name="line.359"></a>
+<span class="sourceLineNo">360</span>   *<a name="line.360"></a>
+<span class="sourceLineNo">361</span>   * &lt;p&gt;This ProglangType (the method receiver) is assumed to be a representation type, not an<a name="line.361"></a>
+<span class="sourceLineNo">362</span>   * arbitrary type in the underlying programming language.<a name="line.362"></a>
+<span class="sourceLineNo">363</span>   *<a name="line.363"></a>
+<span class="sourceLineNo">364</span>   * &lt;p&gt;If the type is an array and there are any nonsensical elements in the array, the entire<a name="line.364"></a>
+<span class="sourceLineNo">365</span>   * array is considered to be nonsensical (indicated by returning null). This is not really<a name="line.365"></a>
+<span class="sourceLineNo">366</span>   * correct, but it is a reasonable path to take for now. (jhp, Feb 12, 2005)<a name="line.366"></a>
+<span class="sourceLineNo">367</span>   */<a name="line.367"></a>
+<span class="sourceLineNo">368</span>  public final @Nullable @Interned Object parse_value(<a name="line.368"></a>
+<span class="sourceLineNo">369</span>      String value, LineNumberReader reader, String filename) {<a name="line.369"></a>
+<span class="sourceLineNo">370</span>    // System.out.println(format() + ".parse(\"" + value + "\")");<a name="line.370"></a>
+<span class="sourceLineNo">371</span><a name="line.371"></a>
+<span class="sourceLineNo">372</span>    switch (dimensions) {<a name="line.372"></a>
+<span class="sourceLineNo">373</span>      case 0:<a name="line.373"></a>
+<span class="sourceLineNo">374</span>        return parse_value_scalar(value, reader, filename);<a name="line.374"></a>
+<span class="sourceLineNo">375</span>      case 1:<a name="line.375"></a>
+<span class="sourceLineNo">376</span>        return parse_value_array_1d(value, reader, filename);<a name="line.376"></a>
+<span class="sourceLineNo">377</span>      case 2:<a name="line.377"></a>
+<span class="sourceLineNo">378</span>        return parse_value_array_2d(value, reader, filename);<a name="line.378"></a>
+<span class="sourceLineNo">379</span>      default:<a name="line.379"></a>
+<span class="sourceLineNo">380</span>        throw new Error("Can't parse a value of type " + format());<a name="line.380"></a>
+<span class="sourceLineNo">381</span>    }<a name="line.381"></a>
+<span class="sourceLineNo">382</span>  }<a name="line.382"></a>
+<span class="sourceLineNo">383</span><a name="line.383"></a>
+<span class="sourceLineNo">384</span>  public final @Nullable @Interned Object parse_value_scalar(<a name="line.384"></a>
+<span class="sourceLineNo">385</span>      String value, LineNumberReader reader, String filename) {<a name="line.385"></a>
+<span class="sourceLineNo">386</span>    // System.out.println(format() + ".parse(\"" + value + "\")");<a name="line.386"></a>
+<span class="sourceLineNo">387</span><a name="line.387"></a>
+<span class="sourceLineNo">388</span>    assert dimensions == 0;<a name="line.388"></a>
+<span class="sourceLineNo">389</span><a name="line.389"></a>
+<span class="sourceLineNo">390</span>    if (base == BASE_STRING) {<a name="line.390"></a>
+<span class="sourceLineNo">391</span>      if (value.equals("null")) {<a name="line.391"></a>
+<span class="sourceLineNo">392</span>        return null;<a name="line.392"></a>
+<span class="sourceLineNo">393</span>      }<a name="line.393"></a>
+<span class="sourceLineNo">394</span>      // assert value.startsWith("\"") &amp;&amp; value.endsWith("\"");<a name="line.394"></a>
+<span class="sourceLineNo">395</span>      if (value.startsWith("\"") &amp;&amp; value.endsWith("\"")) {<a name="line.395"></a>
+<span class="sourceLineNo">396</span>        value = value.substring(1, value.length() - 1);<a name="line.396"></a>
+<span class="sourceLineNo">397</span>      } else {<a name="line.397"></a>
+<span class="sourceLineNo">398</span>        // Unfortunately, there is not a convenient way to communicate what<a name="line.398"></a>
+<span class="sourceLineNo">399</span>        // the variable name is, which would make the error message even<a name="line.399"></a>
+<span class="sourceLineNo">400</span>        // more specific.<a name="line.400"></a>
+<span class="sourceLineNo">401</span>        if (!value.startsWith("\"")) {<a name="line.401"></a>
+<span class="sourceLineNo">402</span>          System.out.printf(<a name="line.402"></a>
+<span class="sourceLineNo">403</span>              "Warning: unquoted string value at %s line %d: %s%n",<a name="line.403"></a>
+<span class="sourceLineNo">404</span>              filename, reader.getLineNumber(), value);<a name="line.404"></a>
+<span class="sourceLineNo">405</span>        } else {<a name="line.405"></a>
+<span class="sourceLineNo">406</span>          assert !value.endsWith("\"");<a name="line.406"></a>
+<span class="sourceLineNo">407</span>          System.out.printf(<a name="line.407"></a>
+<span class="sourceLineNo">408</span>              "Warning: unterminated string value at %s line %d: %s%n",<a name="line.408"></a>
+<span class="sourceLineNo">409</span>              filename, reader.getLineNumber(), value);<a name="line.409"></a>
+<span class="sourceLineNo">410</span>        }<a name="line.410"></a>
+<span class="sourceLineNo">411</span>        System.out.printf(<a name="line.411"></a>
+<span class="sourceLineNo">412</span>            "Proceeding anyway.  Please report a bug in the tool that made the data trace file.");<a name="line.412"></a>
+<span class="sourceLineNo">413</span>      }<a name="line.413"></a>
+<span class="sourceLineNo">414</span>      value = UtilPlume.unescapeJava(value);<a name="line.414"></a>
+<span class="sourceLineNo">415</span>      return value.intern();<a name="line.415"></a>
+<span class="sourceLineNo">416</span>    } else if (base == BASE_CHAR) {<a name="line.416"></a>
+<span class="sourceLineNo">417</span>      // This will fail if the character is output as an integer<a name="line.417"></a>
+<span class="sourceLineNo">418</span>      // (as I believe the C front end does).<a name="line.418"></a>
+<span class="sourceLineNo">419</span>      char c;<a name="line.419"></a>
+<span class="sourceLineNo">420</span>      if (value.length() == 1) {<a name="line.420"></a>
+<span class="sourceLineNo">421</span>        c = value.charAt(0);<a name="line.421"></a>
+<span class="sourceLineNo">422</span>      } else if ((value.length() == 2) &amp;&amp; (value.charAt(0) == '\\')) {<a name="line.422"></a>
+<span class="sourceLineNo">423</span>        c = UtilPlume.unescapeJava(value).charAt(0);<a name="line.423"></a>
+<span class="sourceLineNo">424</span>      } else if ((value.length() == 4) &amp;&amp; (value.charAt(0) == '\\')) {<a name="line.424"></a>
+<span class="sourceLineNo">425</span>        Byte b = Byte.decode("0" + value.substring(1));<a name="line.425"></a>
+<span class="sourceLineNo">426</span>        return Intern.internedLong(b.longValue());<a name="line.426"></a>
+<span class="sourceLineNo">427</span>      } else {<a name="line.427"></a>
+<span class="sourceLineNo">428</span>        throw new IllegalArgumentException("Bad character: " + value);<a name="line.428"></a>
+<span class="sourceLineNo">429</span>      }<a name="line.429"></a>
+<span class="sourceLineNo">430</span>      return Intern.internedLong(Character.getNumericValue(c));<a name="line.430"></a>
+<span class="sourceLineNo">431</span>    }<a name="line.431"></a>
+<span class="sourceLineNo">432</span>    // When parse_value is called from FileIO.read_ppt_decl, we have<a name="line.432"></a>
+<span class="sourceLineNo">433</span>    // not set file_rep_type. Hence, rep_type is still file_rep_type<a name="line.433"></a>
+<span class="sourceLineNo">434</span>    // and BASE_BOOLEAN is legal.<a name="line.434"></a>
+<span class="sourceLineNo">435</span>    else if ((base == BASE_INT) || (base == BASE_BOOLEAN)) {<a name="line.435"></a>
+<span class="sourceLineNo">436</span>      // File rep type might be int, boolean, or hashcode.<a name="line.436"></a>
+<span class="sourceLineNo">437</span>      // If we had the declared type, we could do error-checking here.<a name="line.437"></a>
+<span class="sourceLineNo">438</span>      // (Example:  no hashcode should be negative, nor any boolean &gt; 1.)<a name="line.438"></a>
+<span class="sourceLineNo">439</span>      if (value.equals("nonsensical")) {<a name="line.439"></a>
+<span class="sourceLineNo">440</span>        return null;<a name="line.440"></a>
+<span class="sourceLineNo">441</span>      }<a name="line.441"></a>
+<span class="sourceLineNo">442</span>      if (value.equals("false") || value.equals("0")) {<a name="line.442"></a>
+<span class="sourceLineNo">443</span>        return LongZero;<a name="line.443"></a>
+<span class="sourceLineNo">444</span>      }<a name="line.444"></a>
+<span class="sourceLineNo">445</span>      if (value.equals("true") || value.equals("1")) {<a name="line.445"></a>
+<span class="sourceLineNo">446</span>        return LongOne;<a name="line.446"></a>
+<span class="sourceLineNo">447</span>      }<a name="line.447"></a>
+<span class="sourceLineNo">448</span>      if (value.equals("null")) {<a name="line.448"></a>
+<span class="sourceLineNo">449</span>        return LongZero;<a name="line.449"></a>
+<span class="sourceLineNo">450</span>      }<a name="line.450"></a>
+<span class="sourceLineNo">451</span>      return Intern.internedLong(myParseLong(value));<a name="line.451"></a>
+<span class="sourceLineNo">452</span>    } else if (base == BASE_DOUBLE) {<a name="line.452"></a>
+<span class="sourceLineNo">453</span>      // Must ignore case, because dfej outputs "NaN", while dfec<a name="line.453"></a>
+<span class="sourceLineNo">454</span>      // outputs "nan".  dfec outputs "nan", because this string<a name="line.454"></a>
+<span class="sourceLineNo">455</span>      // comes from the C++ library.<a name="line.455"></a>
+<span class="sourceLineNo">456</span>      if (value.equalsIgnoreCase("NaN")) {<a name="line.456"></a>
+<span class="sourceLineNo">457</span>        return DoubleNaN;<a name="line.457"></a>
+<span class="sourceLineNo">458</span>      }<a name="line.458"></a>
+<span class="sourceLineNo">459</span>      if (value.equalsIgnoreCase("Infinity") || value.equals("inf")) {<a name="line.459"></a>
+<span class="sourceLineNo">460</span>        return DoublePositiveInfinity;<a name="line.460"></a>
+<span class="sourceLineNo">461</span>      }<a name="line.461"></a>
+<span class="sourceLineNo">462</span>      if (value.equalsIgnoreCase("-Infinity") || value.equals("-inf")) {<a name="line.462"></a>
+<span class="sourceLineNo">463</span>        return DoubleNegativeInfinity;<a name="line.463"></a>
+<span class="sourceLineNo">464</span>      }<a name="line.464"></a>
+<span class="sourceLineNo">465</span>      return Intern.internedDouble(value);<a name="line.465"></a>
+<span class="sourceLineNo">466</span>    } else if ((base == BASE_HASHCODE)<a name="line.466"></a>
+<span class="sourceLineNo">467</span>        || (base == BASE_LONG)<a name="line.467"></a>
+<span class="sourceLineNo">468</span>        || (base == BASE_LONG_LONG)<a name="line.468"></a>
+<span class="sourceLineNo">469</span>        || (base == BASE_SHORT)) {<a name="line.469"></a>
+<span class="sourceLineNo">470</span>      throw new Error("not a rep type: illegal base type " + base);<a name="line.470"></a>
+<span class="sourceLineNo">471</span>    } else {<a name="line.471"></a>
+<span class="sourceLineNo">472</span>      throw new Error("unrecognized base type " + base);<a name="line.472"></a>
+<span class="sourceLineNo">473</span>    }<a name="line.473"></a>
+<span class="sourceLineNo">474</span>  }<a name="line.474"></a>
+<span class="sourceLineNo">475</span><a name="line.475"></a>
+<span class="sourceLineNo">476</span>  public final @Nullable @Interned Object parse_value_array_1d(<a name="line.476"></a>
+<span class="sourceLineNo">477</span>      String value, LineNumberReader reader, String filename) {<a name="line.477"></a>
+<span class="sourceLineNo">478</span>    // System.out.println(format() + ".parse(\"" + value + "\")");<a name="line.478"></a>
+<span class="sourceLineNo">479</span><a name="line.479"></a>
+<span class="sourceLineNo">480</span>    String value_orig = value; // we will side-effect the parameter<a name="line.480"></a>
+<span class="sourceLineNo">481</span><a name="line.481"></a>
+<span class="sourceLineNo">482</span>    // variable is an array<a name="line.482"></a>
+<span class="sourceLineNo">483</span>    assert dimensions == 1;<a name="line.483"></a>
+<span class="sourceLineNo">484</span><a name="line.484"></a>
+<span class="sourceLineNo">485</span>    value = value.trim();<a name="line.485"></a>
+<span class="sourceLineNo">486</span><a name="line.486"></a>
+<span class="sourceLineNo">487</span>    // Deal with [] surrounding array output (permits<a name="line.487"></a>
+<span class="sourceLineNo">488</span>    // distinguishing between null and an array containing just null).<a name="line.488"></a>
+<span class="sourceLineNo">489</span>    if (value.startsWith("[") &amp;&amp; value.endsWith("]")) {<a name="line.489"></a>
+<span class="sourceLineNo">490</span>      value = value.substring(1, value.length() - 1).trim();<a name="line.490"></a>
+<span class="sourceLineNo">491</span>    } else {<a name="line.491"></a>
+<span class="sourceLineNo">492</span>      throw new IllegalArgumentException("Array values must be enlosed in square brackets");<a name="line.492"></a>
+<span class="sourceLineNo">493</span>    }<a name="line.493"></a>
+<span class="sourceLineNo">494</span><a name="line.494"></a>
+<span class="sourceLineNo">495</span>    // Elements of value_strings can be null only if base == BASE_STRING.<a name="line.495"></a>
+<span class="sourceLineNo">496</span>    // [I think they can never be null.  -MDE]<a name="line.496"></a>
+<span class="sourceLineNo">497</span>    String[] value_strings;<a name="line.497"></a>
+<span class="sourceLineNo">498</span>    if (value.length() == 0) {<a name="line.498"></a>
+<span class="sourceLineNo">499</span>      value_strings = new String[0];<a name="line.499"></a>
+<span class="sourceLineNo">500</span>    } else if (base == BASE_STRING) {<a name="line.500"></a>
+<span class="sourceLineNo">501</span>      // This properly handles strings containing embedded spaces.<a name="line.501"></a>
+<span class="sourceLineNo">502</span>      List&lt;@Nullable String&gt; v = new ArrayList&lt;&gt;();<a name="line.502"></a>
+<span class="sourceLineNo">503</span>      StreamTokenizer parser = new StreamTokenizer(new StringReader(value));<a name="line.503"></a>
+<span class="sourceLineNo">504</span>      parser.quoteChar('\"');<a name="line.504"></a>
+<span class="sourceLineNo">505</span>      try {<a name="line.505"></a>
+<span class="sourceLineNo">506</span>        while (parser.nextToken() != StreamTokenizer.TT_EOF) {<a name="line.506"></a>
+<span class="sourceLineNo">507</span>          if (parser.ttype == '\"') {<a name="line.507"></a>
+<span class="sourceLineNo">508</span>            v.add(parser.sval);<a name="line.508"></a>
+<span class="sourceLineNo">509</span>          } else if (parser.ttype == StreamTokenizer.TT_WORD) {<a name="line.509"></a>
+<span class="sourceLineNo">510</span>            assert parser.sval != null<a name="line.510"></a>
+<span class="sourceLineNo">511</span>                : "@AssumeAssertion(nullness): dependent: representation invariant of StreamTokenizer";<a name="line.511"></a>
+<span class="sourceLineNo">512</span>            if (parser.sval.equals("nonsensical")) {<a name="line.512"></a>
+<span class="sourceLineNo">513</span>              return null;<a name="line.513"></a>
+<span class="sourceLineNo">514</span>            }<a name="line.514"></a>
+<span class="sourceLineNo">515</span>            assert parser.sval.equals("null");<a name="line.515"></a>
+<span class="sourceLineNo">516</span>            v.add(null);<a name="line.516"></a>
+<span class="sourceLineNo">517</span>          } else if (parser.ttype == StreamTokenizer.TT_NUMBER) {<a name="line.517"></a>
+<span class="sourceLineNo">518</span>            v.add(Integer.toString((int) parser.nval));<a name="line.518"></a>
+<span class="sourceLineNo">519</span>          } else {<a name="line.519"></a>
+<span class="sourceLineNo">520</span>            System.out.printf(<a name="line.520"></a>
+<span class="sourceLineNo">521</span>                "Warning: at %s line %d%n  bad ttype %c [int=%d] while parsing %s%n  Proceeding with value 'null'%n",<a name="line.521"></a>
+<span class="sourceLineNo">522</span>                filename, reader.getLineNumber(), (char) parser.ttype, parser.ttype, value_orig);<a name="line.522"></a>
+<span class="sourceLineNo">523</span>            v.add(null);<a name="line.523"></a>
+<span class="sourceLineNo">524</span>          }<a name="line.524"></a>
+<span class="sourceLineNo">525</span>        }<a name="line.525"></a>
+<span class="sourceLineNo">526</span>      } catch (Exception e) {<a name="line.526"></a>
+<span class="sourceLineNo">527</span>        throw new Error(e);<a name="line.527"></a>
+<span class="sourceLineNo">528</span>      }<a name="line.528"></a>
+<span class="sourceLineNo">529</span>      // Avoid nullness warnings about elements of value_strings<a name="line.529"></a>
+<span class="sourceLineNo">530</span>      @SuppressWarnings("nullness")<a name="line.530"></a>
+<span class="sourceLineNo">531</span>      String[] value_strings_result = v.toArray(new @Nullable String[0]);<a name="line.531"></a>
+<span class="sourceLineNo">532</span>      value_strings = value_strings_result;<a name="line.532"></a>
+<span class="sourceLineNo">533</span>    } else {<a name="line.533"></a>
+<span class="sourceLineNo">534</span>      value_strings = Global.ws_regexp.split(value);<a name="line.534"></a>
+<span class="sourceLineNo">535</span>    }<a name="line.535"></a>
+<span class="sourceLineNo">536</span>    int len = value_strings.length;<a name="line.536"></a>
+<span class="sourceLineNo">537</span><a name="line.537"></a>
+<span class="sourceLineNo">538</span>    // This big if ... else should deal with all the primitive types --<a name="line.538"></a>
+<span class="sourceLineNo">539</span>    // or at least all the ones that can be rep_types.<a name="line.539"></a>
+<span class="sourceLineNo">540</span>    // ("long" and "short" cannot be rep_types; for simplicity, variables<a name="line.540"></a>
+<span class="sourceLineNo">541</span>    // declared as long or short have the "int" rep_type.)<a name="line.541"></a>
+<span class="sourceLineNo">542</span>    if (base == BASE_INT) {<a name="line.542"></a>
+<span class="sourceLineNo">543</span>      long[] result = new long[len];<a name="line.543"></a>
+<span class="sourceLineNo">544</span>      for (int i = 0; i &lt; len; i++) {<a name="line.544"></a>
+<span class="sourceLineNo">545</span>        if (value_strings[i].equals("nonsensical")) {<a name="line.545"></a>
+<span class="sourceLineNo">546</span>          return null;<a name="line.546"></a>
+<span class="sourceLineNo">547</span>        } else if (value_strings[i].equals("null")) result[i] = 0;<a name="line.547"></a>
+<span class="sourceLineNo">548</span>        else if (value_strings[i].equals("false")) result[i] = 0;<a name="line.548"></a>
+<span class="sourceLineNo">549</span>        else if (value_strings[i].equals("true")) result[i] = 1;<a name="line.549"></a>
+<span class="sourceLineNo">550</span>        else {<a name="line.550"></a>
+<span class="sourceLineNo">551</span>          result[i] = myParseLong(value_strings[i]);<a name="line.551"></a>
+<span class="sourceLineNo">552</span>        }<a name="line.552"></a>
+<span class="sourceLineNo">553</span>      }<a name="line.553"></a>
+<span class="sourceLineNo">554</span>      return Intern.intern(result);<a name="line.554"></a>
+<span class="sourceLineNo">555</span>    } else if (base == BASE_DOUBLE) {<a name="line.555"></a>
+<span class="sourceLineNo">556</span>      double[] result = new double[len];<a name="line.556"></a>
+<span class="sourceLineNo">557</span>      for (int i = 0; i &lt; len; i++) {<a name="line.557"></a>
+<span class="sourceLineNo">558</span>        if (value_strings[i].equals("nonsensical")) {<a name="line.558"></a>
+<span class="sourceLineNo">559</span>          return null;<a name="line.559"></a>
+<span class="sourceLineNo">560</span>        } else if (value_strings[i].equals("null")) result[i] = 0;<a name="line.560"></a>
+<span class="sourceLineNo">561</span>        else if (value_strings[i].equalsIgnoreCase("NaN")) result[i] = Double.NaN;<a name="line.561"></a>
+<span class="sourceLineNo">562</span>        else if (value_strings[i].equalsIgnoreCase("Infinity") || value_strings[i].equals("inf")) {<a name="line.562"></a>
+<span class="sourceLineNo">563</span>          result[i] = Double.POSITIVE_INFINITY;<a name="line.563"></a>
+<span class="sourceLineNo">564</span>        } else if (value_strings[i].equalsIgnoreCase("-Infinity")<a name="line.564"></a>
+<span class="sourceLineNo">565</span>            || value_strings[i].equals("-inf")) {<a name="line.565"></a>
+<span class="sourceLineNo">566</span>          result[i] = Double.NEGATIVE_INFINITY;<a name="line.566"></a>
+<span class="sourceLineNo">567</span>        } else {<a name="line.567"></a>
+<span class="sourceLineNo">568</span>          result[i] = Double.parseDouble(value_strings[i]);<a name="line.568"></a>
+<span class="sourceLineNo">569</span>        }<a name="line.569"></a>
+<span class="sourceLineNo">570</span>      }<a name="line.570"></a>
+<span class="sourceLineNo">571</span>      return Intern.intern(result);<a name="line.571"></a>
+<span class="sourceLineNo">572</span>    } else if (base == BASE_STRING) {<a name="line.572"></a>
+<span class="sourceLineNo">573</span>      // First, intern each String in the array ...<a name="line.573"></a>
+<span class="sourceLineNo">574</span>      @Interned String[] value_strings_elts_interned = Intern.internStrings(value_strings);<a name="line.574"></a>
+<span class="sourceLineNo">575</span>      // ... then, intern the entire array, and return it<a name="line.575"></a>
+<span class="sourceLineNo">576</span>      return Intern.intern(value_strings_elts_interned);<a name="line.576"></a>
+<span class="sourceLineNo">577</span>    } else {<a name="line.577"></a>
+<span class="sourceLineNo">578</span>      throw new Error("Can't yet parse array of base type " + base);<a name="line.578"></a>
+<span class="sourceLineNo">579</span>    }<a name="line.579"></a>
+<span class="sourceLineNo">580</span><a name="line.580"></a>
+<span class="sourceLineNo">581</span>    // This is a more general technique; but when will we need<a name="line.581"></a>
+<span class="sourceLineNo">582</span>    // such generality?<a name="line.582"></a>
+<span class="sourceLineNo">583</span>    // // not elementType() because that interns; here, there is no<a name="line.583"></a>
+<span class="sourceLineNo">584</span>    // // need to do the work of interning (I think)<a name="line.584"></a>
+<span class="sourceLineNo">585</span>    // ProglangType elt_type = elementType();<a name="line.585"></a>
+<span class="sourceLineNo">586</span>    // Object[] result = new Object[len];<a name="line.586"></a>
+<span class="sourceLineNo">587</span>    // for (int i = 0; i&lt;len; i++)<a name="line.587"></a>
+<span class="sourceLineNo">588</span>    //   result[i] = ***;<a name="line.588"></a>
+<span class="sourceLineNo">589</span><a name="line.589"></a>
+<span class="sourceLineNo">590</span>  }<a name="line.590"></a>
+<span class="sourceLineNo">591</span><a name="line.591"></a>
+<span class="sourceLineNo">592</span>  public final @Nullable @Interned Object parse_value_array_2d(<a name="line.592"></a>
+<span class="sourceLineNo">593</span>      String value, LineNumberReader reader, String filename) {<a name="line.593"></a>
+<span class="sourceLineNo">594</span>    // System.out.println(format() + ".parse(\"" + value + "\")");<a name="line.594"></a>
+<span class="sourceLineNo">595</span><a name="line.595"></a>
+<span class="sourceLineNo">596</span>    assert dimensions == 2;<a name="line.596"></a>
+<span class="sourceLineNo">597</span>    if (base == BASE_CHAR) {<a name="line.597"></a>
+<span class="sourceLineNo">598</span>      // Array of strings<a name="line.598"></a>
+<span class="sourceLineNo">599</span>      throw new Error("To implement");<a name="line.599"></a>
+<span class="sourceLineNo">600</span>      // value = tuple(eval(value));<a name="line.600"></a>
+<span class="sourceLineNo">601</span>    } else {<a name="line.601"></a>
+<span class="sourceLineNo">602</span>      throw new Error("Can't parse a value of type " + format());<a name="line.602"></a>
+<span class="sourceLineNo">603</span>    }<a name="line.603"></a>
+<span class="sourceLineNo">604</span>  }<a name="line.604"></a>
+<span class="sourceLineNo">605</span><a name="line.605"></a>
+<span class="sourceLineNo">606</span>  public boolean baseIsPrimitive() {<a name="line.606"></a>
+<span class="sourceLineNo">607</span>    return ((base == BASE_BOOLEAN)<a name="line.607"></a>
+<span class="sourceLineNo">608</span>        || (base == BASE_BYTE)<a name="line.608"></a>
+<span class="sourceLineNo">609</span>        || (base == BASE_CHAR)<a name="line.609"></a>
+<span class="sourceLineNo">610</span>        || (base == BASE_DOUBLE)<a name="line.610"></a>
+<span class="sourceLineNo">611</span>        || (base == BASE_FLOAT)<a name="line.611"></a>
+<span class="sourceLineNo">612</span>        || (base == BASE_INT)<a name="line.612"></a>
+<span class="sourceLineNo">613</span>        || (base == BASE_LONG)<a name="line.613"></a>
+<span class="sourceLineNo">614</span>        || (base == BASE_LONG_LONG)<a name="line.614"></a>
+<span class="sourceLineNo">615</span>        || (base == BASE_SHORT));<a name="line.615"></a>
+<span class="sourceLineNo">616</span>  }<a name="line.616"></a>
+<span class="sourceLineNo">617</span><a name="line.617"></a>
+<span class="sourceLineNo">618</span>  @Pure<a name="line.618"></a>
+<span class="sourceLineNo">619</span>  public boolean isPrimitive() {<a name="line.619"></a>
+<span class="sourceLineNo">620</span>    return ((dimensions == 0) &amp;&amp; baseIsPrimitive());<a name="line.620"></a>
+<span class="sourceLineNo">621</span>  }<a name="line.621"></a>
+<span class="sourceLineNo">622</span><a name="line.622"></a>
+<span class="sourceLineNo">623</span>  // Does not include boolean.  Is that intentional?  (If it were added,<a name="line.623"></a>
+<span class="sourceLineNo">624</span>  // we would need to change isIndex().)<a name="line.624"></a>
+<span class="sourceLineNo">625</span>  public boolean baseIsIntegral() {<a name="line.625"></a>
+<span class="sourceLineNo">626</span>    return ((base == BASE_BYTE)<a name="line.626"></a>
+<span class="sourceLineNo">627</span>        || (base == BASE_CHAR)<a name="line.627"></a>
+<span class="sourceLineNo">628</span>        || (base == BASE_INT)<a name="line.628"></a>
+<span class="sourceLineNo">629</span>        || (base == BASE_LONG)<a name="line.629"></a>
+<span class="sourceLineNo">630</span>        || (base == BASE_LONG_LONG)<a name="line.630"></a>
+<span class="sourceLineNo">631</span>        || (base == BASE_SHORT)<a name="line.631"></a>
+<span class="sourceLineNo">632</span>        || (base == BASE_INTEGER));<a name="line.632"></a>
+<span class="sourceLineNo">633</span>  }<a name="line.633"></a>
+<span class="sourceLineNo">634</span><a name="line.634"></a>
+<span class="sourceLineNo">635</span>  @Pure<a name="line.635"></a>
+<span class="sourceLineNo">636</span>  public boolean isIntegral() {<a name="line.636"></a>
+<span class="sourceLineNo">637</span>    return ((dimensions == 0) &amp;&amp; baseIsIntegral());<a name="line.637"></a>
+<span class="sourceLineNo">638</span>  }<a name="line.638"></a>
+<span class="sourceLineNo">639</span><a name="line.639"></a>
+<span class="sourceLineNo">640</span>  // More efficient than elementType().isIntegral()<a name="line.640"></a>
+<span class="sourceLineNo">641</span>  public boolean elementIsIntegral() {<a name="line.641"></a>
+<span class="sourceLineNo">642</span>    return ((dimensions == 1) &amp;&amp; baseIsIntegral());<a name="line.642"></a>
+<span class="sourceLineNo">643</span>  }<a name="line.643"></a>
+<span class="sourceLineNo">644</span><a name="line.644"></a>
+<span class="sourceLineNo">645</span>  public boolean elementIsFloat() {<a name="line.645"></a>
+<span class="sourceLineNo">646</span>    return ((dimensions == 1) &amp;&amp; baseIsFloat());<a name="line.646"></a>
+<span class="sourceLineNo">647</span>  }<a name="line.647"></a>
+<span class="sourceLineNo">648</span><a name="line.648"></a>
+<span class="sourceLineNo">649</span>  public boolean elementIsString() {<a name="line.649"></a>
+<span class="sourceLineNo">650</span>    return ((dimensions == 1) &amp;&amp; baseIsString());<a name="line.650"></a>
+<span class="sourceLineNo">651</span>  }<a name="line.651"></a>
+<span class="sourceLineNo">652</span><a name="line.652"></a>
+<span class="sourceLineNo">653</span>  // Return true if this variable is sensible as an array index.<a name="line.653"></a>
+<span class="sourceLineNo">654</span>  @Pure<a name="line.654"></a>
+<span class="sourceLineNo">655</span>  public boolean isIndex() {<a name="line.655"></a>
+<span class="sourceLineNo">656</span>    return isIntegral();<a name="line.656"></a>
+<span class="sourceLineNo">657</span>  }<a name="line.657"></a>
+<span class="sourceLineNo">658</span><a name="line.658"></a>
+<span class="sourceLineNo">659</span>  @Pure<a name="line.659"></a>
+<span class="sourceLineNo">660</span>  public boolean isScalar() {<a name="line.660"></a>
+<span class="sourceLineNo">661</span>    // For reptypes, checking against INT is sufficient, rather than<a name="line.661"></a>
+<span class="sourceLineNo">662</span>    // calling isIntegral().<a name="line.662"></a>
+<span class="sourceLineNo">663</span>    return (isIntegral() || (this == HASHCODE) || (this == BOOLEAN));<a name="line.663"></a>
+<span class="sourceLineNo">664</span>  }<a name="line.664"></a>
+<span class="sourceLineNo">665</span><a name="line.665"></a>
+<span class="sourceLineNo">666</span>  public boolean baseIsScalar() {<a name="line.666"></a>
+<span class="sourceLineNo">667</span>    return (baseIsIntegral() || (base == BASE_BOOLEAN) || (base == BASE_HASHCODE));<a name="line.667"></a>
+<span class="sourceLineNo">668</span>  }<a name="line.668"></a>
+<span class="sourceLineNo">669</span><a name="line.669"></a>
+<span class="sourceLineNo">670</span>  public boolean baseIsBoolean() {<a name="line.670"></a>
+<span class="sourceLineNo">671</span>    return (base == BASE_BOOLEAN);<a name="line.671"></a>
+<span class="sourceLineNo">672</span>  }<a name="line.672"></a>
+<span class="sourceLineNo">673</span><a name="line.673"></a>
+<span class="sourceLineNo">674</span>  public boolean baseIsFloat() {<a name="line.674"></a>
+<span class="sourceLineNo">675</span>    return ((base == BASE_DOUBLE) || (base == BASE_FLOAT));<a name="line.675"></a>
+<span class="sourceLineNo">676</span>  }<a name="line.676"></a>
+<span class="sourceLineNo">677</span><a name="line.677"></a>
+<span class="sourceLineNo">678</span>  @Pure<a name="line.678"></a>
+<span class="sourceLineNo">679</span>  public boolean isFloat() {<a name="line.679"></a>
+<span class="sourceLineNo">680</span>    return ((dimensions == 0) &amp;&amp; baseIsFloat());<a name="line.680"></a>
+<span class="sourceLineNo">681</span>  }<a name="line.681"></a>
+<span class="sourceLineNo">682</span><a name="line.682"></a>
+<span class="sourceLineNo">683</span>  /**<a name="line.683"></a>
+<span class="sourceLineNo">684</span>   * Return true if this is java.lang.Object.<a name="line.684"></a>
+<span class="sourceLineNo">685</span>   *<a name="line.685"></a>
+<span class="sourceLineNo">686</span>   * @return true if this is java.lang.Object<a name="line.686"></a>
+<span class="sourceLineNo">687</span>   */<a name="line.687"></a>
+<span class="sourceLineNo">688</span>  @Pure<a name="line.688"></a>
+<span class="sourceLineNo">689</span>  public boolean isObject() {<a name="line.689"></a>
+<span class="sourceLineNo">690</span>    return ((dimensions == 0) &amp;&amp; baseIsObject());<a name="line.690"></a>
+<span class="sourceLineNo">691</span>  }<a name="line.691"></a>
+<span class="sourceLineNo">692</span><a name="line.692"></a>
+<span class="sourceLineNo">693</span>  /**<a name="line.693"></a>
+<span class="sourceLineNo">694</span>   * Return true if the base (the final element type) is a reference type rather than integer,<a name="line.694"></a>
+<span class="sourceLineNo">695</span>   * float, or boolean.<a name="line.695"></a>
+<span class="sourceLineNo">696</span>   *<a name="line.696"></a>
+<span class="sourceLineNo">697</span>   * @return true if the base is Object<a name="line.697"></a>
+<span class="sourceLineNo">698</span>   */<a name="line.698"></a>
+<span class="sourceLineNo">699</span>  public boolean baseIsObject() {<a name="line.699"></a>
+<span class="sourceLineNo">700</span>    return (!baseIsIntegral() &amp;&amp; !baseIsFloat() &amp;&amp; !(base == BASE_BOOLEAN));<a name="line.700"></a>
+<span class="sourceLineNo">701</span>  }<a name="line.701"></a>
+<span class="sourceLineNo">702</span><a name="line.702"></a>
+<span class="sourceLineNo">703</span>  public boolean baseIsString() {<a name="line.703"></a>
+<span class="sourceLineNo">704</span>    return (base == BASE_STRING);<a name="line.704"></a>
+<span class="sourceLineNo">705</span>  }<a name="line.705"></a>
+<span class="sourceLineNo">706</span><a name="line.706"></a>
+<span class="sourceLineNo">707</span>  @Pure<a name="line.707"></a>
+<span class="sourceLineNo">708</span>  public boolean isString() {<a name="line.708"></a>
+<span class="sourceLineNo">709</span>    return ((dimensions == 0) &amp;&amp; baseIsString());<a name="line.709"></a>
+<span class="sourceLineNo">710</span>  }<a name="line.710"></a>
+<span class="sourceLineNo">711</span><a name="line.711"></a>
+<span class="sourceLineNo">712</span>  public boolean baseIsHashcode() {<a name="line.712"></a>
+<span class="sourceLineNo">713</span>    return (base == BASE_HASHCODE);<a name="line.713"></a>
+<span class="sourceLineNo">714</span>  }<a name="line.714"></a>
+<span class="sourceLineNo">715</span><a name="line.715"></a>
+<span class="sourceLineNo">716</span>  @Pure<a name="line.716"></a>
+<span class="sourceLineNo">717</span>  public boolean isHashcode() {<a name="line.717"></a>
+<span class="sourceLineNo">718</span>    return ((dimensions == 0) &amp;&amp; baseIsHashcode());<a name="line.718"></a>
+<span class="sourceLineNo">719</span>  }<a name="line.719"></a>
+<span class="sourceLineNo">720</span><a name="line.720"></a>
+<span class="sourceLineNo">721</span>  /** Does this type represent a pointer? Should only be applied to file_rep types. */<a name="line.721"></a>
+<span class="sourceLineNo">722</span>  @Pure<a name="line.722"></a>
+<span class="sourceLineNo">723</span>  public boolean isPointerFileRep() {<a name="line.723"></a>
+<span class="sourceLineNo">724</span>    return (base == BASE_HASHCODE);<a name="line.724"></a>
+<span class="sourceLineNo">725</span>  }<a name="line.725"></a>
+<span class="sourceLineNo">726</span><a name="line.726"></a>
+<span class="sourceLineNo">727</span>  /**<a name="line.727"></a>
+<span class="sourceLineNo">728</span>   * Return true if these two types can be sensibly compared to one another, or if one can be cast<a name="line.728"></a>
+<span class="sourceLineNo">729</span>   * to the other. For instance, int is castable to long, but boolean is not castable to float, and<a name="line.729"></a>
+<span class="sourceLineNo">730</span>   * int is not castable to int[]. This is a reflexive relationship, but not a transitive one<a name="line.730"></a>
+<span class="sourceLineNo">731</span>   * because it might not be true for two children of a superclass, even though it's true for the<a name="line.731"></a>
+<span class="sourceLineNo">732</span>   * superclass.<a name="line.732"></a>
+<span class="sourceLineNo">733</span>   */<a name="line.733"></a>
+<span class="sourceLineNo">734</span>  public boolean comparableOrSuperclassEitherWay(ProglangType other) {<a name="line.734"></a>
+<span class="sourceLineNo">735</span>    if (this == other) { // ProglangType objects are interned<a name="line.735"></a>
+<span class="sourceLineNo">736</span>      return true;<a name="line.736"></a>
+<span class="sourceLineNo">737</span>    }<a name="line.737"></a>
+<span class="sourceLineNo">738</span>    if (this.dimensions != other.dimensions) {<a name="line.738"></a>
+<span class="sourceLineNo">739</span>      return false;<a name="line.739"></a>
+<span class="sourceLineNo">740</span>    }<a name="line.740"></a>
+<span class="sourceLineNo">741</span>    boolean thisIntegral = this.baseIsIntegral();<a name="line.741"></a>
+<span class="sourceLineNo">742</span>    boolean otherIntegral = other.baseIsIntegral();<a name="line.742"></a>
+<span class="sourceLineNo">743</span>    if (thisIntegral &amp;&amp; otherIntegral) {<a name="line.743"></a>
+<span class="sourceLineNo">744</span>      return true;<a name="line.744"></a>
+<span class="sourceLineNo">745</span>    }<a name="line.745"></a>
+<span class="sourceLineNo">746</span>    // Make Object castable to everything, except booleans<a name="line.746"></a>
+<span class="sourceLineNo">747</span>    if (((this.base == BASE_OBJECT) &amp;&amp; other.baseIsObject()) // interned strings<a name="line.747"></a>
+<span class="sourceLineNo">748</span>        || ((other.base == BASE_OBJECT) &amp;&amp; baseIsObject())) { // interned strings<a name="line.748"></a>
+<span class="sourceLineNo">749</span>      return true;<a name="line.749"></a>
+<span class="sourceLineNo">750</span>    }<a name="line.750"></a>
+<span class="sourceLineNo">751</span><a name="line.751"></a>
+<span class="sourceLineNo">752</span>    return false;<a name="line.752"></a>
+<span class="sourceLineNo">753</span>  }<a name="line.753"></a>
+<span class="sourceLineNo">754</span><a name="line.754"></a>
+<span class="sourceLineNo">755</span>  /**<a name="line.755"></a>
+<span class="sourceLineNo">756</span>   * Return true if these two types can be sensibly compared to one another, and if non-integral,<a name="line.756"></a>
+<span class="sourceLineNo">757</span>   * whether this could be a superclass of other. A List is comparableOrSuperclassOf to a ArrayList,<a name="line.757"></a>
+<span class="sourceLineNo">758</span>   * but not the other way around. This is a transitive method, but not reflexive.<a name="line.758"></a>
+<span class="sourceLineNo">759</span>   */<a name="line.759"></a>
+<span class="sourceLineNo">760</span>  public boolean comparableOrSuperclassOf(ProglangType other) {<a name="line.760"></a>
+<span class="sourceLineNo">761</span>    if (this == other) // ProglangType objects are interned<a name="line.761"></a>
+<span class="sourceLineNo">762</span>    return true;<a name="line.762"></a>
+<span class="sourceLineNo">763</span>    if (this.dimensions != other.dimensions) {<a name="line.763"></a>
+<span class="sourceLineNo">764</span>      return false;<a name="line.764"></a>
+<span class="sourceLineNo">765</span>    }<a name="line.765"></a>
+<span class="sourceLineNo">766</span>    boolean thisIntegral = this.baseIsIntegral();<a name="line.766"></a>
+<span class="sourceLineNo">767</span>    boolean otherIntegral = other.baseIsIntegral();<a name="line.767"></a>
+<span class="sourceLineNo">768</span>    if (thisIntegral &amp;&amp; otherIntegral) {<a name="line.768"></a>
+<span class="sourceLineNo">769</span>      return true;<a name="line.769"></a>
+<span class="sourceLineNo">770</span>    }<a name="line.770"></a>
+<span class="sourceLineNo">771</span>    // Make Object castable to everything, except booleans<a name="line.771"></a>
+<span class="sourceLineNo">772</span>    if ((this.base == BASE_OBJECT) &amp;&amp; other.baseIsObject()) // interned strings<a name="line.772"></a>
+<span class="sourceLineNo">773</span>    return true;<a name="line.773"></a>
+<span class="sourceLineNo">774</span><a name="line.774"></a>
+<span class="sourceLineNo">775</span>    return false;<a name="line.775"></a>
+<span class="sourceLineNo">776</span>  }<a name="line.776"></a>
+<span class="sourceLineNo">777</span><a name="line.777"></a>
+<span class="sourceLineNo">778</span>  // For Java programs, a @BinaryName.<a name="line.778"></a>
+<span class="sourceLineNo">779</span>  @SideEffectFree<a name="line.779"></a>
+<span class="sourceLineNo">780</span>  public String format(@GuardSatisfied ProglangType this) {<a name="line.780"></a>
+<span class="sourceLineNo">781</span>    if (dimensions == 0) {<a name="line.781"></a>
+<span class="sourceLineNo">782</span>      return base;<a name="line.782"></a>
+<span class="sourceLineNo">783</span>    }<a name="line.783"></a>
+<span class="sourceLineNo">784</span><a name="line.784"></a>
+<span class="sourceLineNo">785</span>    StringBuilder sb = new StringBuilder();<a name="line.785"></a>
+<span class="sourceLineNo">786</span>    sb.append(base);<a name="line.786"></a>
+<span class="sourceLineNo">787</span>    for (int i = 0; i &lt; dimensions; i++) {<a name="line.787"></a>
+<span class="sourceLineNo">788</span>      sb.append("[]");<a name="line.788"></a>
+<span class="sourceLineNo">789</span>    }<a name="line.789"></a>
+<span class="sourceLineNo">790</span>    return sb.toString();<a name="line.790"></a>
+<span class="sourceLineNo">791</span>  }<a name="line.791"></a>
+<span class="sourceLineNo">792</span><a name="line.792"></a>
+<span class="sourceLineNo">793</span>  // For Java programs, a @BinaryName.<a name="line.793"></a>
+<span class="sourceLineNo">794</span>  @SideEffectFree<a name="line.794"></a>
+<span class="sourceLineNo">795</span>  @Override<a name="line.795"></a>
+<span class="sourceLineNo">796</span>  public String toString(@GuardSatisfied ProglangType this) {<a name="line.796"></a>
+<span class="sourceLineNo">797</span>    return format();<a name="line.797"></a>
+<span class="sourceLineNo">798</span>  }<a name="line.798"></a>
+<span class="sourceLineNo">799</span><a name="line.799"></a>
+<span class="sourceLineNo">800</span>  /**<a name="line.800"></a>
+<span class="sourceLineNo">801</span>   * Returns whether or not this declared type is a function pointer Only valid if the front end<a name="line.801"></a>
+<span class="sourceLineNo">802</span>   * marks the function pointer with the name '*func'.<a name="line.802"></a>
+<span class="sourceLineNo">803</span>   */<a name="line.803"></a>
+<span class="sourceLineNo">804</span>  @Pure<a name="line.804"></a>
+<span class="sourceLineNo">805</span>  public boolean is_function_pointer() {<a name="line.805"></a>
+<span class="sourceLineNo">806</span>    assert base == base.intern();<a name="line.806"></a>
+<span class="sourceLineNo">807</span>    return base == "*func"; // interned<a name="line.807"></a>
+<span class="sourceLineNo">808</span>  }<a name="line.808"></a>
+<span class="sourceLineNo">809</span>}<a name="line.809"></a>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</pre>
+</div>
+</body>
+</html>

@@ -1,0 +1,420 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<html lang="en">
+<head><link rel="icon" href="../../../../daikon-favicon.png" type="image/png"/>
+<title>Source code</title>
+<link rel="stylesheet" type="text/css" href="../../../../stylesheet.css" title="Style">
+</head>
+<body>
+<div class="sourceContainer">
+<pre><span class="sourceLineNo">001</span>package daikon.tools.jtb;<a name="line.1"></a>
+<span class="sourceLineNo">002</span><a name="line.2"></a>
+<span class="sourceLineNo">003</span>import daikon.*;<a name="line.3"></a>
+<span class="sourceLineNo">004</span>import java.util.ArrayList;<a name="line.4"></a>
+<span class="sourceLineNo">005</span>import java.util.Arrays;<a name="line.5"></a>
+<span class="sourceLineNo">006</span>import java.util.List;<a name="line.6"></a>
+<span class="sourceLineNo">007</span>import jtb.*;<a name="line.7"></a>
+<span class="sourceLineNo">008</span>import jtb.syntaxtree.*;<a name="line.8"></a>
+<span class="sourceLineNo">009</span>import jtb.visitor.*;<a name="line.9"></a>
+<span class="sourceLineNo">010</span>import org.checkerframework.checker.nullness.qual.NonNull;<a name="line.10"></a>
+<span class="sourceLineNo">011</span>import org.checkerframework.checker.nullness.qual.Nullable;<a name="line.11"></a>
+<span class="sourceLineNo">012</span>import org.plumelib.util.UtilPlume;<a name="line.12"></a>
+<span class="sourceLineNo">013</span><a name="line.13"></a>
+<span class="sourceLineNo">014</span>/**<a name="line.14"></a>
+<span class="sourceLineNo">015</span> * Matches program point names with their corresponding MethodDeclaration's (or<a name="line.15"></a>
+<span class="sourceLineNo">016</span> * ConstructorDeclaration's) in an AST.<a name="line.16"></a>
+<span class="sourceLineNo">017</span> *<a name="line.17"></a>
+<span class="sourceLineNo">018</span> * &lt;p&gt;There are a number of issues in matching, for example, ASTs contain generics, and program<a name="line.18"></a>
+<span class="sourceLineNo">019</span> * point names do not. This implementation handles such issues.<a name="line.19"></a>
+<span class="sourceLineNo">020</span> */<a name="line.20"></a>
+<span class="sourceLineNo">021</span>public class PptNameMatcher {<a name="line.21"></a>
+<span class="sourceLineNo">022</span><a name="line.22"></a>
+<span class="sourceLineNo">023</span>  // Output debugging information when matching a PptName to an AST.<a name="line.23"></a>
+<span class="sourceLineNo">024</span>  private static boolean debug_getMatches = false;<a name="line.24"></a>
+<span class="sourceLineNo">025</span><a name="line.25"></a>
+<span class="sourceLineNo">026</span>  /** Create an AST matcher that will match program points against AST elements rooted at `root'. */<a name="line.26"></a>
+<span class="sourceLineNo">027</span>  public PptNameMatcher(Node root) {<a name="line.27"></a>
+<span class="sourceLineNo">028</span>    root.accept(new ClassOrInterfaceTypeDecorateVisitor());<a name="line.28"></a>
+<span class="sourceLineNo">029</span>  }<a name="line.29"></a>
+<span class="sourceLineNo">030</span><a name="line.30"></a>
+<span class="sourceLineNo">031</span>  // f0 -&gt; Modifiers()<a name="line.31"></a>
+<span class="sourceLineNo">032</span>  // f1 -&gt; [ "final" | Annotation() ]<a name="line.32"></a>
+<span class="sourceLineNo">033</span>  // f2 -&gt; Type()<a name="line.33"></a>
+<span class="sourceLineNo">034</span>  // f3 -&gt; [ "..." ]<a name="line.34"></a>
+<span class="sourceLineNo">035</span>  // f4 -&gt; VariableDeclaratorId()<a name="line.35"></a>
+<span class="sourceLineNo">036</span>  public String getUngenerifiedType(FormalParameter p) {<a name="line.36"></a>
+<span class="sourceLineNo">037</span><a name="line.37"></a>
+<span class="sourceLineNo">038</span>    Type type = p.f2;<a name="line.38"></a>
+<span class="sourceLineNo">039</span><a name="line.39"></a>
+<span class="sourceLineNo">040</span>    //  Grammar production for type:<a name="line.40"></a>
+<span class="sourceLineNo">041</span>    //  f0 -&gt; ReferenceType()<a name="line.41"></a>
+<span class="sourceLineNo">042</span>    //        | PrimitiveType()<a name="line.42"></a>
+<span class="sourceLineNo">043</span><a name="line.43"></a>
+<span class="sourceLineNo">044</span>    if (type.f0.which == 0) {<a name="line.44"></a>
+<span class="sourceLineNo">045</span>      // It's a reference type.<a name="line.45"></a>
+<span class="sourceLineNo">046</span>      ReferenceType refType = (ReferenceType) type.f0.choice;<a name="line.46"></a>
+<span class="sourceLineNo">047</span>      //  Grammar production for ReferenceType:<a name="line.47"></a>
+<span class="sourceLineNo">048</span>      //  f0 -&gt; PrimitiveType() ( "[" "]" )+<a name="line.48"></a>
+<span class="sourceLineNo">049</span>      //        | ( ClassOrInterfaceType() ) ( "[" "]" )*<a name="line.49"></a>
+<span class="sourceLineNo">050</span><a name="line.50"></a>
+<span class="sourceLineNo">051</span>      if (refType.f0.which == 0) {<a name="line.51"></a>
+<span class="sourceLineNo">052</span>        // It's a primitive array; no generics to handle.<a name="line.52"></a>
+<span class="sourceLineNo">053</span>        return Ast.getType(p);<a name="line.53"></a>
+<span class="sourceLineNo">054</span><a name="line.54"></a>
+<span class="sourceLineNo">055</span>      } else {<a name="line.55"></a>
+<span class="sourceLineNo">056</span><a name="line.56"></a>
+<span class="sourceLineNo">057</span>        // Make a copy of param (because we may modify it: we may<a name="line.57"></a>
+<span class="sourceLineNo">058</span>        // remove some generics stuff).<a name="line.58"></a>
+<span class="sourceLineNo">059</span>        // p.accept(new TreeFormatter());<a name="line.59"></a>
+<span class="sourceLineNo">060</span>        FormalParameter param = (FormalParameter) Ast.create("FormalParameter", Ast.format(p));<a name="line.60"></a>
+<span class="sourceLineNo">061</span><a name="line.61"></a>
+<span class="sourceLineNo">062</span>        Type type2 = param.f2;<a name="line.62"></a>
+<span class="sourceLineNo">063</span>        ReferenceType refType2 = (ReferenceType) type2.f0.choice;<a name="line.63"></a>
+<span class="sourceLineNo">064</span><a name="line.64"></a>
+<span class="sourceLineNo">065</span>        // Note the wrapping parentheses in<a name="line.65"></a>
+<span class="sourceLineNo">066</span>        //    ( ClassOrInterfaceType() ) ( "[" "]" )*<a name="line.66"></a>
+<span class="sourceLineNo">067</span>        NodeSequence intermediateSequence = (NodeSequence) refType2.f0.choice;<a name="line.67"></a>
+<span class="sourceLineNo">068</span>        NodeSequence intermediateSequenceOrig = (NodeSequence) refType.f0.choice;<a name="line.68"></a>
+<span class="sourceLineNo">069</span>        NodeSequence seq = (NodeSequence) intermediateSequence.elementAt(0);<a name="line.69"></a>
+<span class="sourceLineNo">070</span>        NodeSequence seqOrig = (NodeSequence) intermediateSequenceOrig.elementAt(0);<a name="line.70"></a>
+<span class="sourceLineNo">071</span><a name="line.71"></a>
+<span class="sourceLineNo">072</span>        List&lt;Node&gt; singleElementList = seq.nodes;<a name="line.72"></a>
+<span class="sourceLineNo">073</span>        List&lt;Node&gt; singleElementListOrig = seqOrig.nodes;<a name="line.73"></a>
+<span class="sourceLineNo">074</span>        // Replace the ClassOrInterfaceType with its ungenerified version.<a name="line.74"></a>
+<span class="sourceLineNo">075</span><a name="line.75"></a>
+<span class="sourceLineNo">076</span>        //     System.out.println("@0");<a name="line.76"></a>
+<span class="sourceLineNo">077</span>        //     param.accept(new TreeDumper());<a name="line.77"></a>
+<span class="sourceLineNo">078</span><a name="line.78"></a>
+<span class="sourceLineNo">079</span>        // ClassOrInterfaceType t = (ClassOrInterfaceType)singleElementList.get(0);<a name="line.79"></a>
+<span class="sourceLineNo">080</span>        ClassOrInterfaceType tOrig = (ClassOrInterfaceType) singleElementListOrig.get(0);<a name="line.80"></a>
+<span class="sourceLineNo">081</span>        assert tOrig.unGenerifiedVersionOfThis != null;<a name="line.81"></a>
+<span class="sourceLineNo">082</span>        singleElementList.set(0, tOrig.unGenerifiedVersionOfThis);<a name="line.82"></a>
+<span class="sourceLineNo">083</span>        // Return getType of the ungenerified version of p.<a name="line.83"></a>
+<span class="sourceLineNo">084</span><a name="line.84"></a>
+<span class="sourceLineNo">085</span>        // tOrig.unGenerifiedVersionOfThis may have line/col numbering<a name="line.85"></a>
+<span class="sourceLineNo">086</span>        // that's inconsistent with param, so we call a formatter<a name="line.86"></a>
+<span class="sourceLineNo">087</span>        // here. param is only used for matching, and afterwards it's<a name="line.87"></a>
+<span class="sourceLineNo">088</span>        // discarded. So it's ok to reformat it.<a name="line.88"></a>
+<span class="sourceLineNo">089</span>        param.accept(new TreeFormatter());<a name="line.89"></a>
+<span class="sourceLineNo">090</span><a name="line.90"></a>
+<span class="sourceLineNo">091</span>        //     System.out.println("@1");<a name="line.91"></a>
+<span class="sourceLineNo">092</span>        //     param.accept(new TreeDumper());<a name="line.92"></a>
+<span class="sourceLineNo">093</span>        //     System.out.println("@2");<a name="line.93"></a>
+<span class="sourceLineNo">094</span><a name="line.94"></a>
+<span class="sourceLineNo">095</span>        return Ast.getType(param);<a name="line.95"></a>
+<span class="sourceLineNo">096</span>      }<a name="line.96"></a>
+<span class="sourceLineNo">097</span><a name="line.97"></a>
+<span class="sourceLineNo">098</span>    } else {<a name="line.98"></a>
+<span class="sourceLineNo">099</span>      // It's a primitive; no generics to handle.<a name="line.99"></a>
+<span class="sourceLineNo">100</span>      return Ast.getType(p);<a name="line.100"></a>
+<span class="sourceLineNo">101</span>    }<a name="line.101"></a>
+<span class="sourceLineNo">102</span>  }<a name="line.102"></a>
+<span class="sourceLineNo">103</span><a name="line.103"></a>
+<span class="sourceLineNo">104</span>  /** Iterates through program points and returns those that match the given method declaration. */<a name="line.104"></a>
+<span class="sourceLineNo">105</span>  public List&lt;PptTopLevel&gt; getMatches(PptMap ppts, MethodDeclaration methdecl) {<a name="line.105"></a>
+<span class="sourceLineNo">106</span>    return getMatchesInternal(ppts, methdecl);<a name="line.106"></a>
+<span class="sourceLineNo">107</span>  }<a name="line.107"></a>
+<span class="sourceLineNo">108</span><a name="line.108"></a>
+<span class="sourceLineNo">109</span>  /**<a name="line.109"></a>
+<span class="sourceLineNo">110</span>   * Iterates through program points and returns those that match the given constructor declaration.<a name="line.110"></a>
+<span class="sourceLineNo">111</span>   */<a name="line.111"></a>
+<span class="sourceLineNo">112</span>  public List&lt;PptTopLevel&gt; getMatches(PptMap ppts, ConstructorDeclaration constrdecl) {<a name="line.112"></a>
+<span class="sourceLineNo">113</span>    return getMatchesInternal(ppts, constrdecl);<a name="line.113"></a>
+<span class="sourceLineNo">114</span>  }<a name="line.114"></a>
+<span class="sourceLineNo">115</span><a name="line.115"></a>
+<span class="sourceLineNo">116</span>  // Iterates through program points and returns those that match the<a name="line.116"></a>
+<span class="sourceLineNo">117</span>  // given method or constructor declaration.<a name="line.117"></a>
+<span class="sourceLineNo">118</span>  private List&lt;PptTopLevel&gt; getMatchesInternal(PptMap ppts, Node methodOrConstructorDeclaration) {<a name="line.118"></a>
+<span class="sourceLineNo">119</span><a name="line.119"></a>
+<span class="sourceLineNo">120</span>    List&lt;PptTopLevel&gt; result = new ArrayList&lt;&gt;();<a name="line.120"></a>
+<span class="sourceLineNo">121</span><a name="line.121"></a>
+<span class="sourceLineNo">122</span>    for (PptTopLevel ppt : ppts.pptIterable()) {<a name="line.122"></a>
+<span class="sourceLineNo">123</span>      PptName ppt_name = ppt.ppt_name;<a name="line.123"></a>
+<span class="sourceLineNo">124</span><a name="line.124"></a>
+<span class="sourceLineNo">125</span>      if (matches(ppt_name, methodOrConstructorDeclaration)) {<a name="line.125"></a>
+<span class="sourceLineNo">126</span>        result.add(ppt);<a name="line.126"></a>
+<span class="sourceLineNo">127</span>      }<a name="line.127"></a>
+<span class="sourceLineNo">128</span>    }<a name="line.128"></a>
+<span class="sourceLineNo">129</span><a name="line.129"></a>
+<span class="sourceLineNo">130</span>    if (debug_getMatches) System.out.println("getMatchesInternal =&gt; " + result);<a name="line.130"></a>
+<span class="sourceLineNo">131</span>    return result;<a name="line.131"></a>
+<span class="sourceLineNo">132</span>  }<a name="line.132"></a>
+<span class="sourceLineNo">133</span><a name="line.133"></a>
+<span class="sourceLineNo">134</span>  public boolean matches(PptName pptName, Node methodOrConstructorDeclaration) {<a name="line.134"></a>
+<span class="sourceLineNo">135</span><a name="line.135"></a>
+<span class="sourceLineNo">136</span>    // This method figures out three things and then calls another<a name="line.136"></a>
+<span class="sourceLineNo">137</span>    // method to do the match. The three things are:<a name="line.137"></a>
+<span class="sourceLineNo">138</span><a name="line.138"></a>
+<span class="sourceLineNo">139</span>    // 1. method name<a name="line.139"></a>
+<span class="sourceLineNo">140</span>    // 2. class name<a name="line.140"></a>
+<span class="sourceLineNo">141</span>    // 3. method parameters<a name="line.141"></a>
+<span class="sourceLineNo">142</span><a name="line.142"></a>
+<span class="sourceLineNo">143</span>    String classname;<a name="line.143"></a>
+<span class="sourceLineNo">144</span>    String methodname;<a name="line.144"></a>
+<span class="sourceLineNo">145</span>    List&lt;FormalParameter&gt; params;<a name="line.145"></a>
+<span class="sourceLineNo">146</span><a name="line.146"></a>
+<span class="sourceLineNo">147</span>    if (methodOrConstructorDeclaration instanceof MethodDeclaration) {<a name="line.147"></a>
+<span class="sourceLineNo">148</span>      classname = Ast.getClassName((MethodDeclaration) methodOrConstructorDeclaration);<a name="line.148"></a>
+<span class="sourceLineNo">149</span>      methodname = Ast.getName((MethodDeclaration) methodOrConstructorDeclaration);<a name="line.149"></a>
+<span class="sourceLineNo">150</span>      params = Ast.getParameters((MethodDeclaration) methodOrConstructorDeclaration);<a name="line.150"></a>
+<span class="sourceLineNo">151</span>    } else if (methodOrConstructorDeclaration instanceof ConstructorDeclaration) {<a name="line.151"></a>
+<span class="sourceLineNo">152</span>      classname = Ast.getClassName((ConstructorDeclaration) methodOrConstructorDeclaration);<a name="line.152"></a>
+<span class="sourceLineNo">153</span>      methodname = "&lt;init&gt;";<a name="line.153"></a>
+<span class="sourceLineNo">154</span>      params = Ast.getParameters((ConstructorDeclaration) methodOrConstructorDeclaration);<a name="line.154"></a>
+<span class="sourceLineNo">155</span>    } else {<a name="line.155"></a>
+<span class="sourceLineNo">156</span>      throw new Error(<a name="line.156"></a>
+<span class="sourceLineNo">157</span>          "Bad type in Ast.getMatches: must be a MethodDeclaration or a ConstructorDeclaration:"<a name="line.157"></a>
+<span class="sourceLineNo">158</span>              + methodOrConstructorDeclaration);<a name="line.158"></a>
+<span class="sourceLineNo">159</span>    }<a name="line.159"></a>
+<span class="sourceLineNo">160</span><a name="line.160"></a>
+<span class="sourceLineNo">161</span>    if (debug_getMatches) System.out.printf("getMatches(%s, %s, ...)%n", classname, methodname);<a name="line.161"></a>
+<span class="sourceLineNo">162</span>    if (methodname.equals("&lt;init&gt;")) {<a name="line.162"></a>
+<span class="sourceLineNo">163</span>      methodname = simpleName(classname);<a name="line.163"></a>
+<span class="sourceLineNo">164</span>      if (debug_getMatches) {<a name="line.164"></a>
+<span class="sourceLineNo">165</span>        System.out.printf("new methodname: getMatches(%s, %s, ...)%n", classname, methodname);<a name="line.165"></a>
+<span class="sourceLineNo">166</span>      }<a name="line.166"></a>
+<span class="sourceLineNo">167</span>    }<a name="line.167"></a>
+<span class="sourceLineNo">168</span><a name="line.168"></a>
+<span class="sourceLineNo">169</span>    if (debug_getMatches) {<a name="line.169"></a>
+<span class="sourceLineNo">170</span>      System.out.println("getMatch goal = " + classname + " " + methodname);<a name="line.170"></a>
+<span class="sourceLineNo">171</span>    }<a name="line.171"></a>
+<span class="sourceLineNo">172</span><a name="line.172"></a>
+<span class="sourceLineNo">173</span>    return matches(pptName, classname, methodname, params);<a name="line.173"></a>
+<span class="sourceLineNo">174</span>  }<a name="line.174"></a>
+<span class="sourceLineNo">175</span><a name="line.175"></a>
+<span class="sourceLineNo">176</span>  // True if pptName's name matches the method represented by the rest<a name="line.176"></a>
+<span class="sourceLineNo">177</span>  // of the parameters.<a name="line.177"></a>
+<span class="sourceLineNo">178</span>  private boolean matches(<a name="line.178"></a>
+<span class="sourceLineNo">179</span>      PptName pptName, String classname, String methodname, List&lt;FormalParameter&gt; method_params) {<a name="line.179"></a>
+<span class="sourceLineNo">180</span><a name="line.180"></a>
+<span class="sourceLineNo">181</span>    // The goal is a fully qualified classname such as<a name="line.181"></a>
+<span class="sourceLineNo">182</span>    // samples.calculator.Calculator.AbstractOperandState, but<a name="line.182"></a>
+<span class="sourceLineNo">183</span>    // pptName.getFullClassName() can be a binary name such as<a name="line.183"></a>
+<span class="sourceLineNo">184</span>    // samples.calculator.Calculator$AbstractOperandState, at least for the<a name="line.184"></a>
+<span class="sourceLineNo">185</span>    // :::OBJECT program point.  Is that a bug?<a name="line.185"></a>
+<span class="sourceLineNo">186</span><a name="line.186"></a>
+<span class="sourceLineNo">187</span>    // Furthermore, pptName.getMethodName may be null for a constructor.<a name="line.187"></a>
+<span class="sourceLineNo">188</span><a name="line.188"></a>
+<span class="sourceLineNo">189</span>    String pptClassName = pptName.getFullClassName();<a name="line.189"></a>
+<span class="sourceLineNo">190</span>    boolean classname_matches =<a name="line.190"></a>
+<span class="sourceLineNo">191</span>        (classname.equals(pptClassName)<a name="line.191"></a>
+<span class="sourceLineNo">192</span>            || ((pptClassName != null) &amp;&amp; classname.equals(pptClassName.replace('$', '.'))));<a name="line.192"></a>
+<span class="sourceLineNo">193</span>    String pptMethodName = pptName.getMethodName();<a name="line.193"></a>
+<span class="sourceLineNo">194</span>    boolean methodname_matches =<a name="line.194"></a>
+<span class="sourceLineNo">195</span>        (methodname.equals(pptMethodName)<a name="line.195"></a>
+<span class="sourceLineNo">196</span>            || ((pptMethodName != null)<a name="line.196"></a>
+<span class="sourceLineNo">197</span>                &amp;&amp; (pptMethodName.indexOf('$') &gt;= 0)<a name="line.197"></a>
+<span class="sourceLineNo">198</span>                &amp;&amp; methodname.equals(pptMethodName.substring(pptMethodName.lastIndexOf('$') + 1))));<a name="line.198"></a>
+<span class="sourceLineNo">199</span><a name="line.199"></a>
+<span class="sourceLineNo">200</span>    if (!(classname_matches &amp;&amp; methodname_matches)) {<a name="line.200"></a>
+<span class="sourceLineNo">201</span>      if (debug_getMatches) {<a name="line.201"></a>
+<span class="sourceLineNo">202</span>        System.out.printf(<a name="line.202"></a>
+<span class="sourceLineNo">203</span>            "getMatch: class name %s and method name %s DO NOT match candidate.%n",<a name="line.203"></a>
+<span class="sourceLineNo">204</span>            pptClassName, pptMethodName);<a name="line.204"></a>
+<span class="sourceLineNo">205</span>      }<a name="line.205"></a>
+<span class="sourceLineNo">206</span>      return false;<a name="line.206"></a>
+<span class="sourceLineNo">207</span>    }<a name="line.207"></a>
+<span class="sourceLineNo">208</span>    if (debug_getMatches) {<a name="line.208"></a>
+<span class="sourceLineNo">209</span>      System.out.printf(<a name="line.209"></a>
+<span class="sourceLineNo">210</span>          "getMatch: class name %s and method name %s DO match candidate.%n",<a name="line.210"></a>
+<span class="sourceLineNo">211</span>          classname, methodname);<a name="line.211"></a>
+<span class="sourceLineNo">212</span>    }<a name="line.212"></a>
+<span class="sourceLineNo">213</span><a name="line.213"></a>
+<span class="sourceLineNo">214</span>    List&lt;String&gt; pptTypeStrings = extractPptArgs(pptName);<a name="line.214"></a>
+<span class="sourceLineNo">215</span><a name="line.215"></a>
+<span class="sourceLineNo">216</span>    if (pptTypeStrings.size() != method_params.size()) {<a name="line.216"></a>
+<span class="sourceLineNo">217</span><a name="line.217"></a>
+<span class="sourceLineNo">218</span>      // An inner class constructor has an extra first parameter<a name="line.218"></a>
+<span class="sourceLineNo">219</span>      // that is an implicit outer this parameter.  If so, remove it<a name="line.219"></a>
+<span class="sourceLineNo">220</span>      // before checking for a match.<a name="line.220"></a>
+<span class="sourceLineNo">221</span>      boolean OK_outer_this = false;<a name="line.221"></a>
+<span class="sourceLineNo">222</span>      if (pptTypeStrings.size() == method_params.size() + 1) {<a name="line.222"></a>
+<span class="sourceLineNo">223</span>        String icName = innerConstructorName(pptName);<a name="line.223"></a>
+<span class="sourceLineNo">224</span>        if (icName != null) {<a name="line.224"></a>
+<span class="sourceLineNo">225</span>          String param0Full = pptTypeStrings.get(0);<a name="line.225"></a>
+<span class="sourceLineNo">226</span>          // String param0Simple = simpleName(pptTypeStrings.get(0));<a name="line.226"></a>
+<span class="sourceLineNo">227</span>          // Need to check whether param0Simple is the superclass of icName.  How to do that?<a name="line.227"></a>
+<span class="sourceLineNo">228</span>          if (classname.startsWith(param0Full + ".")) {<a name="line.228"></a>
+<span class="sourceLineNo">229</span>            OK_outer_this = true;<a name="line.229"></a>
+<span class="sourceLineNo">230</span>            pptTypeStrings = new ArrayList&lt;String&gt;(pptTypeStrings);<a name="line.230"></a>
+<span class="sourceLineNo">231</span>            pptTypeStrings.remove(0);<a name="line.231"></a>
+<span class="sourceLineNo">232</span>          }<a name="line.232"></a>
+<span class="sourceLineNo">233</span>        }<a name="line.233"></a>
+<span class="sourceLineNo">234</span>      }<a name="line.234"></a>
+<span class="sourceLineNo">235</span>      if (!OK_outer_this) {<a name="line.235"></a>
+<span class="sourceLineNo">236</span>        if (debug_getMatches) {<a name="line.236"></a>
+<span class="sourceLineNo">237</span>          System.out.println(<a name="line.237"></a>
+<span class="sourceLineNo">238</span>              "arg lengths mismatch: " + pptTypeStrings.size() + ", " + method_params.size());<a name="line.238"></a>
+<span class="sourceLineNo">239</span>        }<a name="line.239"></a>
+<span class="sourceLineNo">240</span>        return false;<a name="line.240"></a>
+<span class="sourceLineNo">241</span>      }<a name="line.241"></a>
+<span class="sourceLineNo">242</span>    }<a name="line.242"></a>
+<span class="sourceLineNo">243</span><a name="line.243"></a>
+<span class="sourceLineNo">244</span>    for (int i = 0; i &lt; pptTypeStrings.size(); i++) {<a name="line.244"></a>
+<span class="sourceLineNo">245</span>      String pptTypeString = pptTypeStrings.get(i);<a name="line.245"></a>
+<span class="sourceLineNo">246</span>      FormalParameter astType = method_params.get(i);<a name="line.246"></a>
+<span class="sourceLineNo">247</span><a name="line.247"></a>
+<span class="sourceLineNo">248</span>      if (debug_getMatches) {<a name="line.248"></a>
+<span class="sourceLineNo">249</span>        System.out.println(<a name="line.249"></a>
+<span class="sourceLineNo">250</span>            "getMatch considering "<a name="line.250"></a>
+<span class="sourceLineNo">251</span>                + pptTypeString<a name="line.251"></a>
+<span class="sourceLineNo">252</span>                + " ("<a name="line.252"></a>
+<span class="sourceLineNo">253</span>                + pptName.getFullClassName()<a name="line.253"></a>
+<span class="sourceLineNo">254</span>                + ","<a name="line.254"></a>
+<span class="sourceLineNo">255</span>                + pptName.getMethodName()<a name="line.255"></a>
+<span class="sourceLineNo">256</span>                + ")");<a name="line.256"></a>
+<span class="sourceLineNo">257</span>      }<a name="line.257"></a>
+<span class="sourceLineNo">258</span><a name="line.258"></a>
+<span class="sourceLineNo">259</span>      if (debug_getMatches) {<a name="line.259"></a>
+<span class="sourceLineNo">260</span>        System.out.println("Trying to match at arg position " + Integer.toString(i));<a name="line.260"></a>
+<span class="sourceLineNo">261</span>      }<a name="line.261"></a>
+<span class="sourceLineNo">262</span><a name="line.262"></a>
+<span class="sourceLineNo">263</span>      if (!typeMatch(pptTypeString, astType)) {<a name="line.263"></a>
+<span class="sourceLineNo">264</span>        return false;<a name="line.264"></a>
+<span class="sourceLineNo">265</span>      } else {<a name="line.265"></a>
+<span class="sourceLineNo">266</span>        continue;<a name="line.266"></a>
+<span class="sourceLineNo">267</span>      }<a name="line.267"></a>
+<span class="sourceLineNo">268</span>    }<a name="line.268"></a>
+<span class="sourceLineNo">269</span><a name="line.269"></a>
+<span class="sourceLineNo">270</span>    return true;<a name="line.270"></a>
+<span class="sourceLineNo">271</span>  }<a name="line.271"></a>
+<span class="sourceLineNo">272</span><a name="line.272"></a>
+<span class="sourceLineNo">273</span>  public boolean typeMatch(String pptTypeString, FormalParameter astFormalParameter) {<a name="line.273"></a>
+<span class="sourceLineNo">274</span><a name="line.274"></a>
+<span class="sourceLineNo">275</span>    if (debug_getMatches) System.out.println(Ast.formatEntireTree(astFormalParameter));<a name="line.275"></a>
+<span class="sourceLineNo">276</span><a name="line.276"></a>
+<span class="sourceLineNo">277</span>    String astTypeString = getUngenerifiedType(astFormalParameter);<a name="line.277"></a>
+<span class="sourceLineNo">278</span><a name="line.278"></a>
+<span class="sourceLineNo">279</span>    if (debug_getMatches) {<a name="line.279"></a>
+<span class="sourceLineNo">280</span>      System.out.println("Comparing " + pptTypeString + " to " + astTypeString + ":");<a name="line.280"></a>
+<span class="sourceLineNo">281</span>    }<a name="line.281"></a>
+<span class="sourceLineNo">282</span><a name="line.282"></a>
+<span class="sourceLineNo">283</span>    if (Ast.typeMatch(pptTypeString, astTypeString)) {<a name="line.283"></a>
+<span class="sourceLineNo">284</span>      if (debug_getMatches) System.out.println("Match arg: " + pptTypeString + " " + astTypeString);<a name="line.284"></a>
+<span class="sourceLineNo">285</span>      return true;<a name="line.285"></a>
+<span class="sourceLineNo">286</span>    }<a name="line.286"></a>
+<span class="sourceLineNo">287</span><a name="line.287"></a>
+<span class="sourceLineNo">288</span>    if ((pptTypeString != null) &amp;&amp; Ast.typeMatch(pptTypeString, astTypeString)) {<a name="line.288"></a>
+<span class="sourceLineNo">289</span>      if (debug_getMatches) System.out.println("Match arg: " + pptTypeString + " " + astTypeString);<a name="line.289"></a>
+<span class="sourceLineNo">290</span>      return true;<a name="line.290"></a>
+<span class="sourceLineNo">291</span>    }<a name="line.291"></a>
+<span class="sourceLineNo">292</span><a name="line.292"></a>
+<span class="sourceLineNo">293</span>    if (debug_getMatches) {<a name="line.293"></a>
+<span class="sourceLineNo">294</span>      System.out.println("Mismatch arg: " + pptTypeString + " " + astTypeString);<a name="line.294"></a>
+<span class="sourceLineNo">295</span>    }<a name="line.295"></a>
+<span class="sourceLineNo">296</span><a name="line.296"></a>
+<span class="sourceLineNo">297</span>    return false;<a name="line.297"></a>
+<span class="sourceLineNo">298</span>  }<a name="line.298"></a>
+<span class="sourceLineNo">299</span><a name="line.299"></a>
+<span class="sourceLineNo">300</span>  public List&lt;String&gt; extractPptArgs(PptName ppt_name) {<a name="line.300"></a>
+<span class="sourceLineNo">301</span><a name="line.301"></a>
+<span class="sourceLineNo">302</span>    @SuppressWarnings("nullness") // application invariant<a name="line.302"></a>
+<span class="sourceLineNo">303</span>    @NonNull String pptFullMethodName = ppt_name.getSignature();<a name="line.303"></a>
+<span class="sourceLineNo">304</span><a name="line.304"></a>
+<span class="sourceLineNo">305</span>    if (debug_getMatches) {<a name="line.305"></a>
+<span class="sourceLineNo">306</span>      System.out.println("in extractPptArgs: pptFullMethodName = " + pptFullMethodName);<a name="line.306"></a>
+<span class="sourceLineNo">307</span>    }<a name="line.307"></a>
+<span class="sourceLineNo">308</span>    int lparen = pptFullMethodName.indexOf('(');<a name="line.308"></a>
+<span class="sourceLineNo">309</span>    int rparen = pptFullMethodName.indexOf(')');<a name="line.309"></a>
+<span class="sourceLineNo">310</span>    assert lparen &gt; 0;<a name="line.310"></a>
+<span class="sourceLineNo">311</span>    assert rparen &gt; lparen;<a name="line.311"></a>
+<span class="sourceLineNo">312</span>    String ppt_args_string = pptFullMethodName.substring(lparen + 1, rparen);<a name="line.312"></a>
+<span class="sourceLineNo">313</span>    String[] ppt_args = UtilPlume.split(ppt_args_string, ", ");<a name="line.313"></a>
+<span class="sourceLineNo">314</span>    if ((ppt_args.length == 1) &amp;&amp; ppt_args[0].equals("")) {<a name="line.314"></a>
+<span class="sourceLineNo">315</span>      ppt_args = new String[0];<a name="line.315"></a>
+<span class="sourceLineNo">316</span>    }<a name="line.316"></a>
+<span class="sourceLineNo">317</span><a name="line.317"></a>
+<span class="sourceLineNo">318</span>    return Arrays.&lt;String&gt;asList(ppt_args);<a name="line.318"></a>
+<span class="sourceLineNo">319</span>  }<a name="line.319"></a>
+<span class="sourceLineNo">320</span><a name="line.320"></a>
+<span class="sourceLineNo">321</span>  /** Returns simple name of inner class, or null if ppt_name is not an inner constructor. */<a name="line.321"></a>
+<span class="sourceLineNo">322</span>  private static @Nullable String innerConstructorName(PptName pptName) {<a name="line.322"></a>
+<span class="sourceLineNo">323</span>    String mname = pptName.getMethodName();<a name="line.323"></a>
+<span class="sourceLineNo">324</span>    if (mname == null) {<a name="line.324"></a>
+<span class="sourceLineNo">325</span>      return null;<a name="line.325"></a>
+<span class="sourceLineNo">326</span>    }<a name="line.326"></a>
+<span class="sourceLineNo">327</span>    int dollarpos = mname.lastIndexOf('$');<a name="line.327"></a>
+<span class="sourceLineNo">328</span>    if (dollarpos &gt;= 0) {<a name="line.328"></a>
+<span class="sourceLineNo">329</span>      return mname.substring(dollarpos + 1);<a name="line.329"></a>
+<span class="sourceLineNo">330</span>    }<a name="line.330"></a>
+<span class="sourceLineNo">331</span>    return null;<a name="line.331"></a>
+<span class="sourceLineNo">332</span>  }<a name="line.332"></a>
+<span class="sourceLineNo">333</span><a name="line.333"></a>
+<span class="sourceLineNo">334</span>  /**<a name="line.334"></a>
+<span class="sourceLineNo">335</span>   * Returns the simple name of a possibly-fully-qualified class name. The argument can be a<a name="line.335"></a>
+<span class="sourceLineNo">336</span>   * fully-qualified name or a binary name.<a name="line.336"></a>
+<span class="sourceLineNo">337</span>   */<a name="line.337"></a>
+<span class="sourceLineNo">338</span>  private static String simpleName(String classname) {<a name="line.338"></a>
+<span class="sourceLineNo">339</span>    int dotpos = classname.lastIndexOf('.');<a name="line.339"></a>
+<span class="sourceLineNo">340</span>    int dollarpos = classname.lastIndexOf('$');<a name="line.340"></a>
+<span class="sourceLineNo">341</span>    int pos = Math.max(dotpos, dollarpos);<a name="line.341"></a>
+<span class="sourceLineNo">342</span>    if (pos == -1) {<a name="line.342"></a>
+<span class="sourceLineNo">343</span>      return classname;<a name="line.343"></a>
+<span class="sourceLineNo">344</span>    } else {<a name="line.344"></a>
+<span class="sourceLineNo">345</span>      return classname.substring(pos + 1);<a name="line.345"></a>
+<span class="sourceLineNo">346</span>    }<a name="line.346"></a>
+<span class="sourceLineNo">347</span>  }<a name="line.347"></a>
+<span class="sourceLineNo">348</span>}<a name="line.348"></a>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</pre>
+</div>
+</body>
+</html>

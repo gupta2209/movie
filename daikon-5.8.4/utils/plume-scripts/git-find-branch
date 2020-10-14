@@ -1,0 +1,27 @@
+#!/bin/sh
+
+# Usage:  git-find-branch REPO_URL BRANCH ...
+# Prints either the first BRANCH that exists in REPO_URL,
+# or else prints "master" if none of the branches exists.
+
+# Often, you can use the `git-clone-related` script instead of this one.
+
+if [ "$#" -eq 1 ]; then
+    script=$(basename -- "$0")
+    >&2 echo "Warning: $script requires at least 2 arguments, got $#"
+    >&2 echo "Usage: $script REPO_URL BRANCH ..."
+    >&2 echo "Returning \"master\""
+    echo "master"
+    exit 0
+fi
+
+REPO_URL=$1
+shift
+for BRANCH in "$@"; do
+    if (git ls-remote --quiet --exit-code --heads "${REPO_URL}" "${BRANCH}" > /dev/null) ; then
+        echo "${BRANCH}"
+	exit 0
+    fi
+done
+
+echo "master"

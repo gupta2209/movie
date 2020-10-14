@@ -1,0 +1,140 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<html lang="en">
+<head><link rel="icon" href="../../daikon-favicon.png" type="image/png"/>
+<title>Source code</title>
+<link rel="stylesheet" type="text/css" href="../../stylesheet.css" title="Style">
+</head>
+<body>
+<div class="sourceContainer">
+<pre><span class="sourceLineNo">001</span>package daikon;<a name="line.1"></a>
+<span class="sourceLineNo">002</span><a name="line.2"></a>
+<span class="sourceLineNo">003</span>import daikon.inv.DummyInvariant;<a name="line.3"></a>
+<span class="sourceLineNo">004</span>import daikon.split.Splitter;<a name="line.4"></a>
+<span class="sourceLineNo">005</span>import org.checkerframework.checker.initialization.qual.Initialized;<a name="line.5"></a>
+<span class="sourceLineNo">006</span>import org.checkerframework.checker.nullness.qual.Nullable;<a name="line.6"></a>
+<span class="sourceLineNo">007</span><a name="line.7"></a>
+<span class="sourceLineNo">008</span>// Information about a disjunctive program point that represents just part<a name="line.8"></a>
+<span class="sourceLineNo">009</span>// of the data.<a name="line.9"></a>
+<span class="sourceLineNo">010</span>// This doesn't do any direct computation, instead deferring that to its<a name="line.10"></a>
+<span class="sourceLineNo">011</span>// views that are slices.<a name="line.11"></a>
+<span class="sourceLineNo">012</span><a name="line.12"></a>
+<span class="sourceLineNo">013</span>// This perhaps shouldn't extend PptTopLevel; fix that in the future.<a name="line.13"></a>
+<span class="sourceLineNo">014</span>// For now, it's convenient to take advantage of its functionality.<a name="line.14"></a>
+<span class="sourceLineNo">015</span>// And they're so similar that maybe this is the right thing after all.<a name="line.15"></a>
+<span class="sourceLineNo">016</span>public final class PptConditional extends PptTopLevel {<a name="line.16"></a>
+<span class="sourceLineNo">017</span>  // We are Serializable, so we specify a version to allow changes to<a name="line.17"></a>
+<span class="sourceLineNo">018</span>  // method signatures without breaking serialization.  If you add or<a name="line.18"></a>
+<span class="sourceLineNo">019</span>  // remove fields, you should change this number to the current date.<a name="line.19"></a>
+<span class="sourceLineNo">020</span>  static final long serialVersionUID = 20041216L;<a name="line.20"></a>
+<span class="sourceLineNo">021</span><a name="line.21"></a>
+<span class="sourceLineNo">022</span>  public PptTopLevel parent;<a name="line.22"></a>
+<span class="sourceLineNo">023</span>  public transient Splitter splitter;<a name="line.23"></a>
+<span class="sourceLineNo">024</span>  // indicates whether we're on the true side or the false side of the Splitter<a name="line.24"></a>
+<span class="sourceLineNo">025</span>  public boolean splitter_inverse;<a name="line.25"></a>
+<span class="sourceLineNo">026</span><a name="line.26"></a>
+<span class="sourceLineNo">027</span>  // This does not install the variable values.  The reason is that it's<a name="line.27"></a>
+<span class="sourceLineNo">028</span>  // more efficient to do that for two PptConditional objects at once.<a name="line.28"></a>
+<span class="sourceLineNo">029</span><a name="line.29"></a>
+<span class="sourceLineNo">030</span>  public PptConditional(PptTopLevel parent, Splitter splitter, boolean splitter_inverse) {<a name="line.30"></a>
+<span class="sourceLineNo">031</span><a name="line.31"></a>
+<span class="sourceLineNo">032</span>    super(ctor_name_helper(parent, splitter, splitter_inverse), ctor_vis_helper(parent));<a name="line.32"></a>
+<span class="sourceLineNo">033</span>    // assert splitter.instantiated() == false;<a name="line.33"></a>
+<span class="sourceLineNo">034</span>    this.parent = parent;<a name="line.34"></a>
+<span class="sourceLineNo">035</span>    @SuppressWarnings({"nullness"}) // won't be used until it's fully initialized<a name="line.35"></a>
+<span class="sourceLineNo">036</span>    @Initialized PptConditional thisNonRaw = this;<a name="line.36"></a>
+<span class="sourceLineNo">037</span>    this.splitter = splitter.instantiateSplitter(thisNonRaw);<a name="line.37"></a>
+<span class="sourceLineNo">038</span>    this.splitter_inverse = splitter_inverse;<a name="line.38"></a>
+<span class="sourceLineNo">039</span>    // assert splitter.instantiated() == false;<a name="line.39"></a>
+<span class="sourceLineNo">040</span>    // assert this.splitter.instantiated() == true;<a name="line.40"></a>
+<span class="sourceLineNo">041</span>    // jhp this.invflow_ppts = new PptTopLevel[0];<a name="line.41"></a>
+<span class="sourceLineNo">042</span>    // jhp this.invflow_transforms = new int[0][];<a name="line.42"></a>
+<span class="sourceLineNo">043</span>  }<a name="line.43"></a>
+<span class="sourceLineNo">044</span><a name="line.44"></a>
+<span class="sourceLineNo">045</span>  private static String ctor_name_helper(<a name="line.45"></a>
+<span class="sourceLineNo">046</span>      PptTopLevel parent, Splitter splitter, boolean splitter_inverse) {<a name="line.46"></a>
+<span class="sourceLineNo">047</span>    if (splitter_inverse) {<a name="line.47"></a>
+<span class="sourceLineNo">048</span>      return parent.name + ";condition=\"not(" + splitter.condition() + ")\"";<a name="line.48"></a>
+<span class="sourceLineNo">049</span>    } else {<a name="line.49"></a>
+<span class="sourceLineNo">050</span>      return parent.name + ";condition=\"" + splitter.condition() + "\"";<a name="line.50"></a>
+<span class="sourceLineNo">051</span>    }<a name="line.51"></a>
+<span class="sourceLineNo">052</span>  }<a name="line.52"></a>
+<span class="sourceLineNo">053</span><a name="line.53"></a>
+<span class="sourceLineNo">054</span>  private static VarInfo[] ctor_vis_helper(PptTopLevel parent) {<a name="line.54"></a>
+<span class="sourceLineNo">055</span>    return (VarInfo.arrayclone_simple(parent.var_infos));<a name="line.55"></a>
+<span class="sourceLineNo">056</span>  }<a name="line.56"></a>
+<span class="sourceLineNo">057</span><a name="line.57"></a>
+<span class="sourceLineNo">058</span>  // This is tested after constructing a PptConditional but before<a name="line.58"></a>
+<span class="sourceLineNo">059</span>  // installing it on any lists.  It should perhaps be checked earlier, but<a name="line.59"></a>
+<span class="sourceLineNo">060</span>  // it's convenient (for the Splitter writer) to do so after instantiating.<a name="line.60"></a>
+<span class="sourceLineNo">061</span>  public boolean splitter_valid() {<a name="line.61"></a>
+<span class="sourceLineNo">062</span>    return splitter.valid();<a name="line.62"></a>
+<span class="sourceLineNo">063</span>  }<a name="line.63"></a>
+<span class="sourceLineNo">064</span><a name="line.64"></a>
+<span class="sourceLineNo">065</span>  public @Nullable DummyInvariant dummyInvariant() {<a name="line.65"></a>
+<span class="sourceLineNo">066</span>    return splitter.getDummyInvariant();<a name="line.66"></a>
+<span class="sourceLineNo">067</span>  }<a name="line.67"></a>
+<span class="sourceLineNo">068</span>}<a name="line.68"></a>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</pre>
+</div>
+</body>
+</html>

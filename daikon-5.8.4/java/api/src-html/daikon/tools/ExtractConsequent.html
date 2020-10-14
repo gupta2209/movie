@@ -1,0 +1,552 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<html lang="en">
+<head><link rel="icon" href="../../../daikon-favicon.png" type="image/png"/>
+<title>Source code</title>
+<link rel="stylesheet" type="text/css" href="../../../stylesheet.css" title="Style">
+</head>
+<body>
+<div class="sourceContainer">
+<pre><span class="sourceLineNo">001</span>package daikon.tools;<a name="line.1"></a>
+<span class="sourceLineNo">002</span><a name="line.2"></a>
+<span class="sourceLineNo">003</span>import static java.nio.charset.StandardCharsets.UTF_8;<a name="line.3"></a>
+<span class="sourceLineNo">004</span><a name="line.4"></a>
+<span class="sourceLineNo">005</span>import daikon.Daikon;<a name="line.5"></a>
+<span class="sourceLineNo">006</span>import daikon.FileIO;<a name="line.6"></a>
+<span class="sourceLineNo">007</span>import daikon.Global;<a name="line.7"></a>
+<span class="sourceLineNo">008</span>import daikon.LogHelper;<a name="line.8"></a>
+<span class="sourceLineNo">009</span>import daikon.Ppt;<a name="line.9"></a>
+<span class="sourceLineNo">010</span>import daikon.PptMap;<a name="line.10"></a>
+<span class="sourceLineNo">011</span>import daikon.PptTopLevel;<a name="line.11"></a>
+<span class="sourceLineNo">012</span>import daikon.VarInfo;<a name="line.12"></a>
+<span class="sourceLineNo">013</span>import daikon.inv.Implication;<a name="line.13"></a>
+<span class="sourceLineNo">014</span>import daikon.inv.Invariant;<a name="line.14"></a>
+<span class="sourceLineNo">015</span>import daikon.inv.OutputFormat;<a name="line.15"></a>
+<span class="sourceLineNo">016</span>import gnu.getopt.*;<a name="line.16"></a>
+<span class="sourceLineNo">017</span>import java.io.BufferedWriter;<a name="line.17"></a>
+<span class="sourceLineNo">018</span>import java.io.File;<a name="line.18"></a>
+<span class="sourceLineNo">019</span>import java.io.FileNotFoundException;<a name="line.19"></a>
+<span class="sourceLineNo">020</span>import java.io.IOException;<a name="line.20"></a>
+<span class="sourceLineNo">021</span>import java.io.OutputStreamWriter;<a name="line.21"></a>
+<span class="sourceLineNo">022</span>import java.io.PrintWriter;<a name="line.22"></a>
+<span class="sourceLineNo">023</span>import java.util.ArrayList;<a name="line.23"></a>
+<span class="sourceLineNo">024</span>import java.util.Comparator;<a name="line.24"></a>
+<span class="sourceLineNo">025</span>import java.util.HashMap;<a name="line.25"></a>
+<span class="sourceLineNo">026</span>import java.util.List;<a name="line.26"></a>
+<span class="sourceLineNo">027</span>import java.util.Map;<a name="line.27"></a>
+<span class="sourceLineNo">028</span>import java.util.TreeSet;<a name="line.28"></a>
+<span class="sourceLineNo">029</span>import java.util.logging.Logger;<a name="line.29"></a>
+<span class="sourceLineNo">030</span>import java.util.regex.Matcher;<a name="line.30"></a>
+<span class="sourceLineNo">031</span>import java.util.regex.Pattern;<a name="line.31"></a>
+<span class="sourceLineNo">032</span>import java.util.regex.PatternSyntaxException;<a name="line.32"></a>
+<span class="sourceLineNo">033</span>import org.checkerframework.checker.nullness.qual.KeyFor;<a name="line.33"></a>
+<span class="sourceLineNo">034</span>import org.checkerframework.checker.nullness.qual.Nullable;<a name="line.34"></a>
+<span class="sourceLineNo">035</span>import org.plumelib.util.UtilPlume;<a name="line.35"></a>
+<span class="sourceLineNo">036</span><a name="line.36"></a>
+<span class="sourceLineNo">037</span>/**<a name="line.37"></a>
+<span class="sourceLineNo">038</span> * Extract the consequents of all Implication invariants that are predicated by membership in a<a name="line.38"></a>
+<span class="sourceLineNo">039</span> * cluster, from a {@code .inv} file. An example of such an implication would be "(cluster ==<a name="line.39"></a>
+<span class="sourceLineNo">040</span> * &lt;em&gt;NUM&lt;/em&gt;) &amp;rArr; consequent". The consequent is only true in certain clusters, but is not<a name="line.40"></a>
+<span class="sourceLineNo">041</span> * generally true for all executions of the program point to which the Implication belongs. These<a name="line.41"></a>
+<span class="sourceLineNo">042</span> * resulting implications are written to standard output in the format of a splitter info file.<a name="line.42"></a>
+<span class="sourceLineNo">043</span> */<a name="line.43"></a>
+<span class="sourceLineNo">044</span>public class ExtractConsequent {<a name="line.44"></a>
+<span class="sourceLineNo">045</span><a name="line.45"></a>
+<span class="sourceLineNo">046</span>  public static final Logger debug = Logger.getLogger("daikon.ExtractConsequent");<a name="line.46"></a>
+<span class="sourceLineNo">047</span>  private static final String lineSep = Global.lineSep;<a name="line.47"></a>
+<span class="sourceLineNo">048</span><a name="line.48"></a>
+<span class="sourceLineNo">049</span>  private static class HashedConsequent {<a name="line.49"></a>
+<span class="sourceLineNo">050</span>    Invariant inv;<a name="line.50"></a>
+<span class="sourceLineNo">051</span><a name="line.51"></a>
+<span class="sourceLineNo">052</span>    // This field, `fakeFor`, is a simplified/preferred version of the invariant.<a name="line.52"></a>
+<span class="sourceLineNo">053</span>    // We prefer "x &lt; y", "x &gt; y", and "x == y" to the conditions<a name="line.53"></a>
+<span class="sourceLineNo">054</span>    // "x &gt;= y", "x &lt;= y", and "x != y" that (respectively) give the<a name="line.54"></a>
+<span class="sourceLineNo">055</span>    // same split.  When we see a dispreferred form, we index it by<a name="line.55"></a>
+<span class="sourceLineNo">056</span>    // the preferred form, and if there's already an entry (from the<a name="line.56"></a>
+<span class="sourceLineNo">057</span>    // real preferred one) we throw the new one out. Otherwise, we<a name="line.57"></a>
+<span class="sourceLineNo">058</span>    // insert both the dispreferred form and an entry for the<a name="line.58"></a>
+<span class="sourceLineNo">059</span>    // preferred form, with a pointer pack to the dispreferred<a name="line.59"></a>
+<span class="sourceLineNo">060</span>    // form. If we later see the preferred form, we replace the<a name="line.60"></a>
+<span class="sourceLineNo">061</span>    // placeholder and remove the dispreferred form.<a name="line.61"></a>
+<span class="sourceLineNo">062</span>    final @Nullable String fakeFor;<a name="line.62"></a>
+<span class="sourceLineNo">063</span><a name="line.63"></a>
+<span class="sourceLineNo">064</span>    HashedConsequent(Invariant inv, @Nullable String fakeFor) {<a name="line.64"></a>
+<span class="sourceLineNo">065</span>      this.inv = inv;<a name="line.65"></a>
+<span class="sourceLineNo">066</span>      this.fakeFor = fakeFor;<a name="line.66"></a>
+<span class="sourceLineNo">067</span>    }<a name="line.67"></a>
+<span class="sourceLineNo">068</span>  }<a name="line.68"></a>
+<span class="sourceLineNo">069</span><a name="line.69"></a>
+<span class="sourceLineNo">070</span>  /* A HashMap whose keys are PPT names (Strings) and whose values are<a name="line.70"></a>
+<span class="sourceLineNo">071</span>  HashMaps whose keys are predicate names (Strings) and whose values are<a name="line.71"></a>
+<span class="sourceLineNo">072</span>   HashMaps whose keys are Strings (normalized java-format invariants)<a name="line.72"></a>
+<span class="sourceLineNo">073</span>     and whose values are HashedConsequent objects. */<a name="line.73"></a>
+<span class="sourceLineNo">074</span>  private static Map&lt;String, Map&lt;String, Map&lt;String, HashedConsequent&gt;&gt;&gt; pptname_to_conditions =<a name="line.74"></a>
+<span class="sourceLineNo">075</span>      new HashMap&lt;&gt;();<a name="line.75"></a>
+<span class="sourceLineNo">076</span><a name="line.76"></a>
+<span class="sourceLineNo">077</span>  private static String usage =<a name="line.77"></a>
+<span class="sourceLineNo">078</span>      UtilPlume.joinLines(<a name="line.78"></a>
+<span class="sourceLineNo">079</span>          "Usage: java daikon.ExtractConsequent [OPTION]... FILE",<a name="line.79"></a>
+<span class="sourceLineNo">080</span>          "  -h, --" + Daikon.help_SWITCH,<a name="line.80"></a>
+<span class="sourceLineNo">081</span>          "      Display this usage message",<a name="line.81"></a>
+<span class="sourceLineNo">082</span>          "  --" + Daikon.suppress_redundant_SWITCH,<a name="line.82"></a>
+<span class="sourceLineNo">083</span>          "      Suppress display of logically redundant invariants.",<a name="line.83"></a>
+<span class="sourceLineNo">084</span>          "  --" + Daikon.debugAll_SWITCH,<a name="line.84"></a>
+<span class="sourceLineNo">085</span>          "      Turn on all debug switches",<a name="line.85"></a>
+<span class="sourceLineNo">086</span>          "  --" + Daikon.debug_SWITCH + " &lt;logger&gt;",<a name="line.86"></a>
+<span class="sourceLineNo">087</span>          "      Turn on the specified debug logger");<a name="line.87"></a>
+<span class="sourceLineNo">088</span><a name="line.88"></a>
+<span class="sourceLineNo">089</span>  public static void main(String[] args)<a name="line.89"></a>
+<span class="sourceLineNo">090</span>      throws FileNotFoundException, IOException, ClassNotFoundException {<a name="line.90"></a>
+<span class="sourceLineNo">091</span>    try {<a name="line.91"></a>
+<span class="sourceLineNo">092</span>      mainHelper(args);<a name="line.92"></a>
+<span class="sourceLineNo">093</span>    } catch (Daikon.DaikonTerminationException e) {<a name="line.93"></a>
+<span class="sourceLineNo">094</span>      Daikon.handleDaikonTerminationException(e);<a name="line.94"></a>
+<span class="sourceLineNo">095</span>    }<a name="line.95"></a>
+<span class="sourceLineNo">096</span>  }<a name="line.96"></a>
+<span class="sourceLineNo">097</span><a name="line.97"></a>
+<span class="sourceLineNo">098</span>  /**<a name="line.98"></a>
+<span class="sourceLineNo">099</span>   * This does the work of {@link #main(String[])}, but it never calls System.exit, so it is<a name="line.99"></a>
+<span class="sourceLineNo">100</span>   * appropriate to be called progrmmatically.<a name="line.100"></a>
+<span class="sourceLineNo">101</span>   *<a name="line.101"></a>
+<span class="sourceLineNo">102</span>   * @param args command-line arguments, like those of {@link #main}<a name="line.102"></a>
+<span class="sourceLineNo">103</span>   */<a name="line.103"></a>
+<span class="sourceLineNo">104</span>  public static void mainHelper(final String[] args)<a name="line.104"></a>
+<span class="sourceLineNo">105</span>      throws FileNotFoundException, IOException, ClassNotFoundException {<a name="line.105"></a>
+<span class="sourceLineNo">106</span>    daikon.LogHelper.setupLogs(daikon.LogHelper.INFO);<a name="line.106"></a>
+<span class="sourceLineNo">107</span>    LongOpt[] longopts =<a name="line.107"></a>
+<span class="sourceLineNo">108</span>        new LongOpt[] {<a name="line.108"></a>
+<span class="sourceLineNo">109</span>          new LongOpt(Daikon.suppress_redundant_SWITCH, LongOpt.NO_ARGUMENT, null, 0),<a name="line.109"></a>
+<span class="sourceLineNo">110</span>          new LongOpt(Daikon.config_option_SWITCH, LongOpt.REQUIRED_ARGUMENT, null, 0),<a name="line.110"></a>
+<span class="sourceLineNo">111</span>          new LongOpt(Daikon.debugAll_SWITCH, LongOpt.NO_ARGUMENT, null, 0),<a name="line.111"></a>
+<span class="sourceLineNo">112</span>          new LongOpt(Daikon.debug_SWITCH, LongOpt.REQUIRED_ARGUMENT, null, 0),<a name="line.112"></a>
+<span class="sourceLineNo">113</span>        };<a name="line.113"></a>
+<span class="sourceLineNo">114</span>    Getopt g = new Getopt("daikon.ExtractConsequent", args, "h", longopts);<a name="line.114"></a>
+<span class="sourceLineNo">115</span>    int c;<a name="line.115"></a>
+<span class="sourceLineNo">116</span>    while ((c = g.getopt()) != -1) {<a name="line.116"></a>
+<span class="sourceLineNo">117</span>      switch (c) {<a name="line.117"></a>
+<span class="sourceLineNo">118</span>        case 0:<a name="line.118"></a>
+<span class="sourceLineNo">119</span>          // got a long option<a name="line.119"></a>
+<span class="sourceLineNo">120</span>          String option_name = longopts[g.getLongind()].getName();<a name="line.120"></a>
+<span class="sourceLineNo">121</span>          if (Daikon.help_SWITCH.equals(option_name)) {<a name="line.121"></a>
+<span class="sourceLineNo">122</span>            System.out.println(usage);<a name="line.122"></a>
+<span class="sourceLineNo">123</span>            throw new Daikon.NormalTermination();<a name="line.123"></a>
+<span class="sourceLineNo">124</span>          } else if (Daikon.suppress_redundant_SWITCH.equals(option_name)) {<a name="line.124"></a>
+<span class="sourceLineNo">125</span>            Daikon.suppress_redundant_invariants_with_simplify = true;<a name="line.125"></a>
+<span class="sourceLineNo">126</span>          } else if (Daikon.config_option_SWITCH.equals(option_name)) {<a name="line.126"></a>
+<span class="sourceLineNo">127</span>            String item = Daikon.getOptarg(g);<a name="line.127"></a>
+<span class="sourceLineNo">128</span>            daikon.config.Configuration.getInstance().apply(item);<a name="line.128"></a>
+<span class="sourceLineNo">129</span>            break;<a name="line.129"></a>
+<span class="sourceLineNo">130</span>          } else if (Daikon.debugAll_SWITCH.equals(option_name)) {<a name="line.130"></a>
+<span class="sourceLineNo">131</span>            Global.debugAll = true;<a name="line.131"></a>
+<span class="sourceLineNo">132</span>          } else if (Daikon.debug_SWITCH.equals(option_name)) {<a name="line.132"></a>
+<span class="sourceLineNo">133</span>            LogHelper.setLevel(Daikon.getOptarg(g), LogHelper.FINE);<a name="line.133"></a>
+<span class="sourceLineNo">134</span>          } else {<a name="line.134"></a>
+<span class="sourceLineNo">135</span>            throw new RuntimeException("Unknown long option received: " + option_name);<a name="line.135"></a>
+<span class="sourceLineNo">136</span>          }<a name="line.136"></a>
+<span class="sourceLineNo">137</span>          break;<a name="line.137"></a>
+<span class="sourceLineNo">138</span>        case 'h':<a name="line.138"></a>
+<span class="sourceLineNo">139</span>          System.out.println(usage);<a name="line.139"></a>
+<span class="sourceLineNo">140</span>          throw new Daikon.NormalTermination();<a name="line.140"></a>
+<span class="sourceLineNo">141</span>        case '?':<a name="line.141"></a>
+<span class="sourceLineNo">142</span>          break; // getopt() already printed an error<a name="line.142"></a>
+<span class="sourceLineNo">143</span>        default:<a name="line.143"></a>
+<span class="sourceLineNo">144</span>          System.out.println("getopt() returned " + c);<a name="line.144"></a>
+<span class="sourceLineNo">145</span>          break;<a name="line.145"></a>
+<span class="sourceLineNo">146</span>      }<a name="line.146"></a>
+<span class="sourceLineNo">147</span>    }<a name="line.147"></a>
+<span class="sourceLineNo">148</span>    // The index of the first non-option argument -- the name of the file<a name="line.148"></a>
+<span class="sourceLineNo">149</span>    int fileIndex = g.getOptind();<a name="line.149"></a>
+<span class="sourceLineNo">150</span>    if (args.length - fileIndex != 1) {<a name="line.150"></a>
+<span class="sourceLineNo">151</span>      throw new Daikon.UserError("Wrong number of arguments." + Daikon.lineSep + usage);<a name="line.151"></a>
+<span class="sourceLineNo">152</span>    }<a name="line.152"></a>
+<span class="sourceLineNo">153</span>    String filename = args[fileIndex];<a name="line.153"></a>
+<span class="sourceLineNo">154</span>    PptMap ppts =<a name="line.154"></a>
+<span class="sourceLineNo">155</span>        FileIO.read_serialized_pptmap(<a name="line.155"></a>
+<span class="sourceLineNo">156</span>            new File(filename), true // use saved config<a name="line.156"></a>
+<span class="sourceLineNo">157</span>            );<a name="line.157"></a>
+<span class="sourceLineNo">158</span>    extract_consequent(ppts);<a name="line.158"></a>
+<span class="sourceLineNo">159</span>  }<a name="line.159"></a>
+<span class="sourceLineNo">160</span><a name="line.160"></a>
+<span class="sourceLineNo">161</span>  public static void extract_consequent(PptMap ppts) {<a name="line.161"></a>
+<span class="sourceLineNo">162</span>    // Retrieve Ppt objects in sorted order.<a name="line.162"></a>
+<span class="sourceLineNo">163</span>    // Use a custom comparator for a specific ordering<a name="line.163"></a>
+<span class="sourceLineNo">164</span>    Comparator&lt;PptTopLevel&gt; comparator = new Ppt.NameComparator();<a name="line.164"></a>
+<span class="sourceLineNo">165</span>    TreeSet&lt;PptTopLevel&gt; ppts_sorted = new TreeSet&lt;&gt;(comparator);<a name="line.165"></a>
+<span class="sourceLineNo">166</span>    ppts_sorted.addAll(ppts.asCollection());<a name="line.166"></a>
+<span class="sourceLineNo">167</span><a name="line.167"></a>
+<span class="sourceLineNo">168</span>    for (PptTopLevel ppt : ppts_sorted) {<a name="line.168"></a>
+<span class="sourceLineNo">169</span>      extract_consequent_maybe(ppt, ppts);<a name="line.169"></a>
+<span class="sourceLineNo">170</span>    }<a name="line.170"></a>
+<span class="sourceLineNo">171</span><a name="line.171"></a>
+<span class="sourceLineNo">172</span>    PrintWriter pw =<a name="line.172"></a>
+<span class="sourceLineNo">173</span>        new PrintWriter(new BufferedWriter(new OutputStreamWriter(System.out, UTF_8)), true);<a name="line.173"></a>
+<span class="sourceLineNo">174</span><a name="line.174"></a>
+<span class="sourceLineNo">175</span>    // All conditions at a program point.  A TreeSet to enable<a name="line.175"></a>
+<span class="sourceLineNo">176</span>    // deterministic output.<a name="line.176"></a>
+<span class="sourceLineNo">177</span>    TreeSet&lt;String&gt; allConds = new TreeSet&lt;&gt;();<a name="line.177"></a>
+<span class="sourceLineNo">178</span>    for (String pptname : pptname_to_conditions.keySet()) {<a name="line.178"></a>
+<span class="sourceLineNo">179</span>      Map&lt;String, Map&lt;String, HashedConsequent&gt;&gt; cluster_to_conditions =<a name="line.179"></a>
+<span class="sourceLineNo">180</span>          pptname_to_conditions.get(pptname);<a name="line.180"></a>
+<span class="sourceLineNo">181</span>      for (Map.Entry&lt;@KeyFor("cluster_to_conditions") String, Map&lt;String, HashedConsequent&gt;&gt; entry :<a name="line.181"></a>
+<span class="sourceLineNo">182</span>          cluster_to_conditions.entrySet()) {<a name="line.182"></a>
+<span class="sourceLineNo">183</span>        Map&lt;String, HashedConsequent&gt; conditions = entry.getValue();<a name="line.183"></a>
+<span class="sourceLineNo">184</span>        StringBuilder conjunctionJava = new StringBuilder();<a name="line.184"></a>
+<span class="sourceLineNo">185</span>        StringBuilder conjunctionDaikon = new StringBuilder();<a name="line.185"></a>
+<span class="sourceLineNo">186</span>        StringBuilder conjunctionESC = new StringBuilder();<a name="line.186"></a>
+<span class="sourceLineNo">187</span>        StringBuilder conjunctionSimplify = new StringBuilder("(AND ");<a name="line.187"></a>
+<span class="sourceLineNo">188</span>        int count = 0;<a name="line.188"></a>
+<span class="sourceLineNo">189</span>        for (Map.Entry&lt;@KeyFor("conditions") String, HashedConsequent&gt; entry2 :<a name="line.189"></a>
+<span class="sourceLineNo">190</span>            conditions.entrySet()) {<a name="line.190"></a>
+<span class="sourceLineNo">191</span>          count++;<a name="line.191"></a>
+<span class="sourceLineNo">192</span>          String condIndex = entry2.getKey();<a name="line.192"></a>
+<span class="sourceLineNo">193</span>          HashedConsequent cond = entry2.getValue();<a name="line.193"></a>
+<span class="sourceLineNo">194</span>          if (cond.fakeFor != null) {<a name="line.194"></a>
+<span class="sourceLineNo">195</span>            count--;<a name="line.195"></a>
+<span class="sourceLineNo">196</span>            continue;<a name="line.196"></a>
+<span class="sourceLineNo">197</span>          }<a name="line.197"></a>
+<span class="sourceLineNo">198</span>          String javaStr = cond.inv.format_using(OutputFormat.JAVA);<a name="line.198"></a>
+<span class="sourceLineNo">199</span>          String daikonStr = cond.inv.format_using(OutputFormat.DAIKON);<a name="line.199"></a>
+<span class="sourceLineNo">200</span>          String escStr = cond.inv.format_using(OutputFormat.ESCJAVA);<a name="line.200"></a>
+<span class="sourceLineNo">201</span>          String simplifyStr = cond.inv.format_using(OutputFormat.SIMPLIFY);<a name="line.201"></a>
+<span class="sourceLineNo">202</span>          allConds.add(combineDummy(condIndex, "&lt;dummy&gt; " + daikonStr, escStr, simplifyStr));<a name="line.202"></a>
+<span class="sourceLineNo">203</span>          //           allConds.add(condIndex);<a name="line.203"></a>
+<span class="sourceLineNo">204</span>          if (count &gt; 0) {<a name="line.204"></a>
+<span class="sourceLineNo">205</span>            conjunctionJava.append(" &amp;&amp; ");<a name="line.205"></a>
+<span class="sourceLineNo">206</span>            conjunctionDaikon.append(" and ");<a name="line.206"></a>
+<span class="sourceLineNo">207</span>            conjunctionESC.append(" &amp;&amp; ");<a name="line.207"></a>
+<span class="sourceLineNo">208</span>            conjunctionSimplify.append(" ");<a name="line.208"></a>
+<span class="sourceLineNo">209</span>          }<a name="line.209"></a>
+<span class="sourceLineNo">210</span>          conjunctionJava.append(javaStr);<a name="line.210"></a>
+<span class="sourceLineNo">211</span>          conjunctionDaikon.append(daikonStr);<a name="line.211"></a>
+<span class="sourceLineNo">212</span>          conjunctionESC.append(escStr);<a name="line.212"></a>
+<span class="sourceLineNo">213</span>          conjunctionSimplify.append(simplifyStr);<a name="line.213"></a>
+<span class="sourceLineNo">214</span>        }<a name="line.214"></a>
+<span class="sourceLineNo">215</span>        conjunctionSimplify.append(")");<a name="line.215"></a>
+<span class="sourceLineNo">216</span>        String conj = conjunctionJava.toString();<a name="line.216"></a>
+<span class="sourceLineNo">217</span>        // Avoid inserting self-contradictory conditions such as "x == 1 &amp;&amp;<a name="line.217"></a>
+<span class="sourceLineNo">218</span>        // x == 2", or conjunctions of only a single condition.<a name="line.218"></a>
+<span class="sourceLineNo">219</span>        if (count &lt; 2<a name="line.219"></a>
+<span class="sourceLineNo">220</span>            || contradict_inv_pattern.matcher(conj).find()<a name="line.220"></a>
+<span class="sourceLineNo">221</span>            || useless_inv_pattern_1.matcher(conj).find()<a name="line.221"></a>
+<span class="sourceLineNo">222</span>            || useless_inv_pattern_2.matcher(conj).find()) {<a name="line.222"></a>
+<span class="sourceLineNo">223</span>          // System.out.println("Suppressing: " + conj);<a name="line.223"></a>
+<span class="sourceLineNo">224</span>        } else {<a name="line.224"></a>
+<span class="sourceLineNo">225</span>          allConds.add(<a name="line.225"></a>
+<span class="sourceLineNo">226</span>              combineDummy(<a name="line.226"></a>
+<span class="sourceLineNo">227</span>                  conjunctionJava.toString(),<a name="line.227"></a>
+<span class="sourceLineNo">228</span>                  conjunctionDaikon.toString(),<a name="line.228"></a>
+<span class="sourceLineNo">229</span>                  conjunctionESC.toString(),<a name="line.229"></a>
+<span class="sourceLineNo">230</span>                  conjunctionSimplify.toString()));<a name="line.230"></a>
+<span class="sourceLineNo">231</span>        }<a name="line.231"></a>
+<span class="sourceLineNo">232</span>      }<a name="line.232"></a>
+<span class="sourceLineNo">233</span><a name="line.233"></a>
+<span class="sourceLineNo">234</span>      if (allConds.size() &gt; 0) {<a name="line.234"></a>
+<span class="sourceLineNo">235</span>        pw.println();<a name="line.235"></a>
+<span class="sourceLineNo">236</span>        pw.println("PPT_NAME " + pptname);<a name="line.236"></a>
+<span class="sourceLineNo">237</span>        for (String s : allConds) {<a name="line.237"></a>
+<span class="sourceLineNo">238</span>          pw.println(s);<a name="line.238"></a>
+<span class="sourceLineNo">239</span>        }<a name="line.239"></a>
+<span class="sourceLineNo">240</span>      }<a name="line.240"></a>
+<span class="sourceLineNo">241</span>      allConds.clear();<a name="line.241"></a>
+<span class="sourceLineNo">242</span>    }<a name="line.242"></a>
+<span class="sourceLineNo">243</span><a name="line.243"></a>
+<span class="sourceLineNo">244</span>    pw.flush();<a name="line.244"></a>
+<span class="sourceLineNo">245</span>  }<a name="line.245"></a>
+<span class="sourceLineNo">246</span><a name="line.246"></a>
+<span class="sourceLineNo">247</span>  static String combineDummy(String inv, String daikonStr, String esc, String simplify) {<a name="line.247"></a>
+<span class="sourceLineNo">248</span>    StringBuilder combined = new StringBuilder(inv);<a name="line.248"></a>
+<span class="sourceLineNo">249</span>    combined.append(lineSep + "\tDAIKON_FORMAT ");<a name="line.249"></a>
+<span class="sourceLineNo">250</span>    combined.append(daikonStr);<a name="line.250"></a>
+<span class="sourceLineNo">251</span>    combined.append(lineSep + "\tESC_FORMAT ");<a name="line.251"></a>
+<span class="sourceLineNo">252</span>    combined.append(esc);<a name="line.252"></a>
+<span class="sourceLineNo">253</span>    combined.append(lineSep + "\tSIMPLIFY_FORMAT ");<a name="line.253"></a>
+<span class="sourceLineNo">254</span>    combined.append(simplify);<a name="line.254"></a>
+<span class="sourceLineNo">255</span>    return combined.toString();<a name="line.255"></a>
+<span class="sourceLineNo">256</span>  }<a name="line.256"></a>
+<span class="sourceLineNo">257</span><a name="line.257"></a>
+<span class="sourceLineNo">258</span>  /**<a name="line.258"></a>
+<span class="sourceLineNo">259</span>   * Extract consequents from a implications at a single program point. It only searches for<a name="line.259"></a>
+<span class="sourceLineNo">260</span>   * top-level program points because Implications are produced only at those points.<a name="line.260"></a>
+<span class="sourceLineNo">261</span>   */<a name="line.261"></a>
+<span class="sourceLineNo">262</span>  public static void extract_consequent_maybe(PptTopLevel ppt, PptMap all_ppts) {<a name="line.262"></a>
+<span class="sourceLineNo">263</span>    ppt.simplify_variable_names();<a name="line.263"></a>
+<span class="sourceLineNo">264</span><a name="line.264"></a>
+<span class="sourceLineNo">265</span>    List&lt;Invariant&gt; invs = new ArrayList&lt;&gt;();<a name="line.265"></a>
+<span class="sourceLineNo">266</span>    if (invs.size() &gt; 0) {<a name="line.266"></a>
+<span class="sourceLineNo">267</span>      String pptname = cleanup_pptname(ppt.name());<a name="line.267"></a>
+<span class="sourceLineNo">268</span>      for (Invariant maybe_as_inv : invs) {<a name="line.268"></a>
+<span class="sourceLineNo">269</span>        Implication maybe = (Implication) maybe_as_inv;<a name="line.269"></a>
+<span class="sourceLineNo">270</span><a name="line.270"></a>
+<span class="sourceLineNo">271</span>        // don't print redundant invariants.<a name="line.271"></a>
+<span class="sourceLineNo">272</span>        if (Daikon.suppress_redundant_invariants_with_simplify<a name="line.272"></a>
+<span class="sourceLineNo">273</span>            &amp;&amp; maybe.ppt.parent.redundant_invs.contains(maybe)) {<a name="line.273"></a>
+<span class="sourceLineNo">274</span>          continue;<a name="line.274"></a>
+<span class="sourceLineNo">275</span>        }<a name="line.275"></a>
+<span class="sourceLineNo">276</span><a name="line.276"></a>
+<span class="sourceLineNo">277</span>        // don't print out invariants with min(), max(), or sum() variables<a name="line.277"></a>
+<span class="sourceLineNo">278</span>        boolean mms = false;<a name="line.278"></a>
+<span class="sourceLineNo">279</span>        VarInfo[] varbls = maybe.ppt.var_infos;<a name="line.279"></a>
+<span class="sourceLineNo">280</span>        for (int v = 0; !mms &amp;&amp; v &lt; varbls.length; v++) {<a name="line.280"></a>
+<span class="sourceLineNo">281</span>          mms |= varbls[v].isDerivedSequenceMinMaxSum();<a name="line.281"></a>
+<span class="sourceLineNo">282</span>        }<a name="line.282"></a>
+<span class="sourceLineNo">283</span>        if (mms) {<a name="line.283"></a>
+<span class="sourceLineNo">284</span>          continue;<a name="line.284"></a>
+<span class="sourceLineNo">285</span>        }<a name="line.285"></a>
+<span class="sourceLineNo">286</span><a name="line.286"></a>
+<span class="sourceLineNo">287</span>        if (maybe.ppt.parent.ppt_name.isExitPoint()) {<a name="line.287"></a>
+<span class="sourceLineNo">288</span>          for (int i = 0; i &lt; maybe.ppt.var_infos.length; i++) {<a name="line.288"></a>
+<span class="sourceLineNo">289</span>            VarInfo vi = maybe.ppt.var_infos[i];<a name="line.289"></a>
+<span class="sourceLineNo">290</span>            if (vi.isDerivedParam()) {<a name="line.290"></a>
+<span class="sourceLineNo">291</span>              continue;<a name="line.291"></a>
+<span class="sourceLineNo">292</span>            }<a name="line.292"></a>
+<span class="sourceLineNo">293</span>          }<a name="line.293"></a>
+<span class="sourceLineNo">294</span>        }<a name="line.294"></a>
+<span class="sourceLineNo">295</span><a name="line.295"></a>
+<span class="sourceLineNo">296</span>        Invariant consequent = maybe.consequent();<a name="line.296"></a>
+<span class="sourceLineNo">297</span>        Invariant predicate = maybe.predicate();<a name="line.297"></a>
+<span class="sourceLineNo">298</span>        Invariant inv, cluster_inv;<a name="line.298"></a>
+<span class="sourceLineNo">299</span>        boolean cons_uses_cluster = false, pred_uses_cluster = false;<a name="line.299"></a>
+<span class="sourceLineNo">300</span>        // extract the consequent (predicate) if the predicate<a name="line.300"></a>
+<span class="sourceLineNo">301</span>        // (consequent) uses the variable "cluster".  Ignore if they<a name="line.301"></a>
+<span class="sourceLineNo">302</span>        // both depend on "cluster"<a name="line.302"></a>
+<span class="sourceLineNo">303</span>        if (consequent.usesVarDerived("cluster")) cons_uses_cluster = true;<a name="line.303"></a>
+<span class="sourceLineNo">304</span>        if (predicate.usesVarDerived("cluster")) {<a name="line.304"></a>
+<span class="sourceLineNo">305</span>          pred_uses_cluster = true;<a name="line.305"></a>
+<span class="sourceLineNo">306</span>        }<a name="line.306"></a>
+<span class="sourceLineNo">307</span><a name="line.307"></a>
+<span class="sourceLineNo">308</span>        if (!(pred_uses_cluster ^ cons_uses_cluster)) {<a name="line.308"></a>
+<span class="sourceLineNo">309</span>          continue;<a name="line.309"></a>
+<span class="sourceLineNo">310</span>        } else if (pred_uses_cluster) {<a name="line.310"></a>
+<span class="sourceLineNo">311</span>          inv = consequent;<a name="line.311"></a>
+<span class="sourceLineNo">312</span>          cluster_inv = predicate;<a name="line.312"></a>
+<span class="sourceLineNo">313</span>        } else {<a name="line.313"></a>
+<span class="sourceLineNo">314</span>          inv = predicate;<a name="line.314"></a>
+<span class="sourceLineNo">315</span>          cluster_inv = consequent;<a name="line.315"></a>
+<span class="sourceLineNo">316</span>        }<a name="line.316"></a>
+<span class="sourceLineNo">317</span><a name="line.317"></a>
+<span class="sourceLineNo">318</span>        if (!inv.isWorthPrinting()) {<a name="line.318"></a>
+<span class="sourceLineNo">319</span>          continue;<a name="line.319"></a>
+<span class="sourceLineNo">320</span>        }<a name="line.320"></a>
+<span class="sourceLineNo">321</span><a name="line.321"></a>
+<span class="sourceLineNo">322</span>        if (contains_constant_non_012(inv)) {<a name="line.322"></a>
+<span class="sourceLineNo">323</span>          continue;<a name="line.323"></a>
+<span class="sourceLineNo">324</span>        }<a name="line.324"></a>
+<span class="sourceLineNo">325</span><a name="line.325"></a>
+<span class="sourceLineNo">326</span>        // filter out unwanted invariants<a name="line.326"></a>
+<span class="sourceLineNo">327</span><a name="line.327"></a>
+<span class="sourceLineNo">328</span>        // 1) Invariants involving sequences<a name="line.328"></a>
+<span class="sourceLineNo">329</span>        if (inv instanceof daikon.inv.binary.twoSequence.TwoSequence<a name="line.329"></a>
+<span class="sourceLineNo">330</span>            || inv instanceof daikon.inv.binary.sequenceScalar.SequenceScalar<a name="line.330"></a>
+<span class="sourceLineNo">331</span>            || inv instanceof daikon.inv.binary.sequenceString.SequenceString<a name="line.331"></a>
+<span class="sourceLineNo">332</span>            || inv instanceof daikon.inv.unary.sequence.SingleSequence<a name="line.332"></a>
+<span class="sourceLineNo">333</span>            || inv instanceof daikon.inv.unary.stringsequence.SingleStringSequence) {<a name="line.333"></a>
+<span class="sourceLineNo">334</span>          continue;<a name="line.334"></a>
+<span class="sourceLineNo">335</span>        }<a name="line.335"></a>
+<span class="sourceLineNo">336</span><a name="line.336"></a>
+<span class="sourceLineNo">337</span>        if (inv instanceof daikon.inv.ternary.threeScalar.LinearTernary<a name="line.337"></a>
+<span class="sourceLineNo">338</span>            || inv instanceof daikon.inv.binary.twoScalar.LinearBinary) {<a name="line.338"></a>
+<span class="sourceLineNo">339</span>          continue;<a name="line.339"></a>
+<span class="sourceLineNo">340</span>        }<a name="line.340"></a>
+<span class="sourceLineNo">341</span><a name="line.341"></a>
+<span class="sourceLineNo">342</span>        String inv_string = inv.format_using(OutputFormat.JAVA);<a name="line.342"></a>
+<span class="sourceLineNo">343</span>        if (orig_pattern.matcher(inv_string).find()<a name="line.343"></a>
+<span class="sourceLineNo">344</span>            || dot_class_pattern.matcher(inv_string).find()) {<a name="line.344"></a>
+<span class="sourceLineNo">345</span>          continue;<a name="line.345"></a>
+<span class="sourceLineNo">346</span>        }<a name="line.346"></a>
+<span class="sourceLineNo">347</span>        String fake_inv_string = simplify_inequalities(inv_string);<a name="line.347"></a>
+<span class="sourceLineNo">348</span>        HashedConsequent real = new HashedConsequent(inv, null);<a name="line.348"></a>
+<span class="sourceLineNo">349</span>        if (!fake_inv_string.equals(inv_string)) {<a name="line.349"></a>
+<span class="sourceLineNo">350</span>          // For instance, inv_string is "x != y", fake_inv_string is "x == y"<a name="line.350"></a>
+<span class="sourceLineNo">351</span>          HashedConsequent fake = new HashedConsequent(inv, inv_string);<a name="line.351"></a>
+<span class="sourceLineNo">352</span>          boolean added =<a name="line.352"></a>
+<span class="sourceLineNo">353</span>              store_invariant(<a name="line.353"></a>
+<span class="sourceLineNo">354</span>                  cluster_inv.format_using(OutputFormat.JAVA), fake_inv_string, fake, pptname);<a name="line.354"></a>
+<span class="sourceLineNo">355</span>          if (!added) {<a name="line.355"></a>
+<span class="sourceLineNo">356</span>            // We couldn't add "x == y", (when we're "x != y") because<a name="line.356"></a>
+<span class="sourceLineNo">357</span>            // it already exists; so don't add "x == y" either.<a name="line.357"></a>
+<span class="sourceLineNo">358</span>            continue;<a name="line.358"></a>
+<span class="sourceLineNo">359</span>          }<a name="line.359"></a>
+<span class="sourceLineNo">360</span>        }<a name="line.360"></a>
+<span class="sourceLineNo">361</span>        store_invariant(cluster_inv.format_using(OutputFormat.JAVA), inv_string, real, pptname);<a name="line.361"></a>
+<span class="sourceLineNo">362</span>      }<a name="line.362"></a>
+<span class="sourceLineNo">363</span>    }<a name="line.363"></a>
+<span class="sourceLineNo">364</span>  }<a name="line.364"></a>
+<span class="sourceLineNo">365</span><a name="line.365"></a>
+<span class="sourceLineNo">366</span>  // Store the invariant for later printing. Ignore duplicate<a name="line.366"></a>
+<span class="sourceLineNo">367</span>  // invariants at the same program point.<a name="line.367"></a>
+<span class="sourceLineNo">368</span>  private static boolean store_invariant(<a name="line.368"></a>
+<span class="sourceLineNo">369</span>      String predicate, String index, HashedConsequent consequent, String pptname) {<a name="line.369"></a>
+<span class="sourceLineNo">370</span>    if (!pptname_to_conditions.containsKey(pptname)) {<a name="line.370"></a>
+<span class="sourceLineNo">371</span>      pptname_to_conditions.put(pptname, new HashMap&lt;&gt;());<a name="line.371"></a>
+<span class="sourceLineNo">372</span>    }<a name="line.372"></a>
+<span class="sourceLineNo">373</span><a name="line.373"></a>
+<span class="sourceLineNo">374</span>    Map&lt;String, Map&lt;String, HashedConsequent&gt;&gt; cluster_to_conditions =<a name="line.374"></a>
+<span class="sourceLineNo">375</span>        pptname_to_conditions.get(pptname);<a name="line.375"></a>
+<span class="sourceLineNo">376</span>    if (!cluster_to_conditions.containsKey(predicate)) {<a name="line.376"></a>
+<span class="sourceLineNo">377</span>      cluster_to_conditions.put(predicate, new HashMap&lt;&gt;());<a name="line.377"></a>
+<span class="sourceLineNo">378</span>    }<a name="line.378"></a>
+<span class="sourceLineNo">379</span><a name="line.379"></a>
+<span class="sourceLineNo">380</span>    Map&lt;String, HashedConsequent&gt; conditions = cluster_to_conditions.get(predicate);<a name="line.380"></a>
+<span class="sourceLineNo">381</span>    if (conditions.containsKey(index)) {<a name="line.381"></a>
+<span class="sourceLineNo">382</span>      HashedConsequent old = conditions.get(index);<a name="line.382"></a>
+<span class="sourceLineNo">383</span>      if (old.fakeFor != null &amp;&amp; consequent.fakeFor == null) {<a name="line.383"></a>
+<span class="sourceLineNo">384</span>        // We already saw (say) "x != y", but we're "x == y", so replace it.<a name="line.384"></a>
+<span class="sourceLineNo">385</span>        conditions.remove(index);<a name="line.385"></a>
+<span class="sourceLineNo">386</span>        conditions.remove(old.fakeFor);<a name="line.386"></a>
+<span class="sourceLineNo">387</span>        conditions.put(index, consequent);<a name="line.387"></a>
+<span class="sourceLineNo">388</span>        return true;<a name="line.388"></a>
+<span class="sourceLineNo">389</span>      }<a name="line.389"></a>
+<span class="sourceLineNo">390</span>      return false;<a name="line.390"></a>
+<span class="sourceLineNo">391</span>    } else {<a name="line.391"></a>
+<span class="sourceLineNo">392</span>      conditions.put(index, consequent);<a name="line.392"></a>
+<span class="sourceLineNo">393</span>      return true;<a name="line.393"></a>
+<span class="sourceLineNo">394</span>    }<a name="line.394"></a>
+<span class="sourceLineNo">395</span>  }<a name="line.395"></a>
+<span class="sourceLineNo">396</span><a name="line.396"></a>
+<span class="sourceLineNo">397</span>  private static boolean contains_constant_non_012(Invariant inv) {<a name="line.397"></a>
+<span class="sourceLineNo">398</span>    if (inv instanceof daikon.inv.unary.scalar.OneOfScalar) {<a name="line.398"></a>
+<span class="sourceLineNo">399</span>      daikon.inv.unary.scalar.OneOfScalar oneof = (daikon.inv.unary.scalar.OneOfScalar) inv;<a name="line.399"></a>
+<span class="sourceLineNo">400</span>      // TODO: isInteresting has been removed.  Do we need to deal with it specially here?<a name="line.400"></a>
+<span class="sourceLineNo">401</span>      // OneOf invariants that indicate a small set ( &gt; 1 element) of<a name="line.401"></a>
+<span class="sourceLineNo">402</span>      // possible values are not interesting, and have already been<a name="line.402"></a>
+<span class="sourceLineNo">403</span>      // eliminated by the isInteresting check<a name="line.403"></a>
+<span class="sourceLineNo">404</span>      long num = ((Long) oneof.elt()).longValue();<a name="line.404"></a>
+<span class="sourceLineNo">405</span>      if (num &gt; 2 || num &lt; -1) {<a name="line.405"></a>
+<span class="sourceLineNo">406</span>        return true;<a name="line.406"></a>
+<span class="sourceLineNo">407</span>      }<a name="line.407"></a>
+<span class="sourceLineNo">408</span>    }<a name="line.408"></a>
+<span class="sourceLineNo">409</span><a name="line.409"></a>
+<span class="sourceLineNo">410</span>    return false;<a name="line.410"></a>
+<span class="sourceLineNo">411</span>  }<a name="line.411"></a>
+<span class="sourceLineNo">412</span><a name="line.412"></a>
+<span class="sourceLineNo">413</span>  // remove non-word characters and everything after ":::" from the<a name="line.413"></a>
+<span class="sourceLineNo">414</span>  // program point name, leaving PackageName.ClassName.MethodName<a name="line.414"></a>
+<span class="sourceLineNo">415</span>  private static String cleanup_pptname(String pptname) {<a name="line.415"></a>
+<span class="sourceLineNo">416</span>    int index;<a name="line.416"></a>
+<span class="sourceLineNo">417</span>    if ((index = pptname.indexOf("(")) &gt; 0) {<a name="line.417"></a>
+<span class="sourceLineNo">418</span>      pptname = pptname.substring(0, index);<a name="line.418"></a>
+<span class="sourceLineNo">419</span>    }<a name="line.419"></a>
+<span class="sourceLineNo">420</span><a name="line.420"></a>
+<span class="sourceLineNo">421</span>    if (pptname.endsWith(".")) {<a name="line.421"></a>
+<span class="sourceLineNo">422</span>      pptname = pptname.substring(0, pptname.length() - 2);<a name="line.422"></a>
+<span class="sourceLineNo">423</span>    }<a name="line.423"></a>
+<span class="sourceLineNo">424</span><a name="line.424"></a>
+<span class="sourceLineNo">425</span>    Matcher m = non_word_pattern.matcher(pptname);<a name="line.425"></a>
+<span class="sourceLineNo">426</span>    return m.replaceAll(".");<a name="line.426"></a>
+<span class="sourceLineNo">427</span>  }<a name="line.427"></a>
+<span class="sourceLineNo">428</span><a name="line.428"></a>
+<span class="sourceLineNo">429</span>  /**<a name="line.429"></a>
+<span class="sourceLineNo">430</span>   * Prevents the occurence of "equivalent" inequalities, or inequalities which produce the same<a name="line.430"></a>
+<span class="sourceLineNo">431</span>   * pair of splits at a program point, for example "x &lt;= y" and "x &amp;gt; y". Replaces "&amp;ge;" with<a name="line.431"></a>
+<span class="sourceLineNo">432</span>   * "&lt;", "&amp;le;" with "&gt;", and "!=" with "==" so that the occurence of equivalent inequalities can<a name="line.432"></a>
+<span class="sourceLineNo">433</span>   * be detected. However it tries not to be smart ... If there is more than one inequality in the<a name="line.433"></a>
+<span class="sourceLineNo">434</span>   * expression, it doesn't perform a substitution.<a name="line.434"></a>
+<span class="sourceLineNo">435</span>   */<a name="line.435"></a>
+<span class="sourceLineNo">436</span>  private static String simplify_inequalities(String condition) {<a name="line.436"></a>
+<span class="sourceLineNo">437</span>    if (contains_exactly_one(condition, inequality_pattern)) {<a name="line.437"></a>
+<span class="sourceLineNo">438</span>      if (gteq_pattern.matcher(condition).find()) {<a name="line.438"></a>
+<span class="sourceLineNo">439</span>        condition = gteq_pattern.matcher(condition).replaceFirst("&lt;");<a name="line.439"></a>
+<span class="sourceLineNo">440</span>      } else if (lteq_pattern.matcher(condition).find()) {<a name="line.440"></a>
+<span class="sourceLineNo">441</span>        condition = lteq_pattern.matcher(condition).replaceFirst("&gt;");<a name="line.441"></a>
+<span class="sourceLineNo">442</span>      } else if (neq_pattern.matcher(condition).find()) {<a name="line.442"></a>
+<span class="sourceLineNo">443</span>        condition = neq_pattern.matcher(condition).replaceFirst("==");<a name="line.443"></a>
+<span class="sourceLineNo">444</span>      } else {<a name="line.444"></a>
+<span class="sourceLineNo">445</span>        throw new Error("this can't happen");<a name="line.445"></a>
+<span class="sourceLineNo">446</span>      }<a name="line.446"></a>
+<span class="sourceLineNo">447</span>    }<a name="line.447"></a>
+<span class="sourceLineNo">448</span>    return condition;<a name="line.448"></a>
+<span class="sourceLineNo">449</span>  }<a name="line.449"></a>
+<span class="sourceLineNo">450</span><a name="line.450"></a>
+<span class="sourceLineNo">451</span>  private static boolean contains_exactly_one(String string, Pattern pattern) {<a name="line.451"></a>
+<span class="sourceLineNo">452</span>    Matcher m = pattern.matcher(string);<a name="line.452"></a>
+<span class="sourceLineNo">453</span>    // return true if first call returns true and second returns false<a name="line.453"></a>
+<span class="sourceLineNo">454</span>    return (m.find() &amp;&amp; !m.find());<a name="line.454"></a>
+<span class="sourceLineNo">455</span>  }<a name="line.455"></a>
+<span class="sourceLineNo">456</span><a name="line.456"></a>
+<span class="sourceLineNo">457</span>  static Pattern orig_pattern, dot_class_pattern, non_word_pattern;<a name="line.457"></a>
+<span class="sourceLineNo">458</span>  static Pattern gteq_pattern, lteq_pattern, neq_pattern, inequality_pattern;<a name="line.458"></a>
+<span class="sourceLineNo">459</span>  static Pattern contradict_inv_pattern, useless_inv_pattern_1, useless_inv_pattern_2;<a name="line.459"></a>
+<span class="sourceLineNo">460</span><a name="line.460"></a>
+<span class="sourceLineNo">461</span>  static {<a name="line.461"></a>
+<span class="sourceLineNo">462</span>    try {<a name="line.462"></a>
+<span class="sourceLineNo">463</span>      non_word_pattern = Pattern.compile("\\W+");<a name="line.463"></a>
+<span class="sourceLineNo">464</span>      orig_pattern = Pattern.compile("orig\\s*\\(");<a name="line.464"></a>
+<span class="sourceLineNo">465</span>      dot_class_pattern = Pattern.compile("\\.class");<a name="line.465"></a>
+<span class="sourceLineNo">466</span>      inequality_pattern = Pattern.compile("[\\!&lt;&gt;]=");<a name="line.466"></a>
+<span class="sourceLineNo">467</span>      gteq_pattern = Pattern.compile("&gt;=");<a name="line.467"></a>
+<span class="sourceLineNo">468</span>      lteq_pattern = Pattern.compile("&lt;=");<a name="line.468"></a>
+<span class="sourceLineNo">469</span>      neq_pattern = Pattern.compile("\\!=");<a name="line.469"></a>
+<span class="sourceLineNo">470</span>      contradict_inv_pattern =<a name="line.470"></a>
+<span class="sourceLineNo">471</span>          Pattern.compile("(^| &amp;&amp; )(.*) == -?[0-9]+ &amp;.*&amp; \\2 == -?[0-9]+($| &amp;&amp; )");<a name="line.471"></a>
+<span class="sourceLineNo">472</span>      useless_inv_pattern_1 =<a name="line.472"></a>
+<span class="sourceLineNo">473</span>          Pattern.compile("(^| &amp;&amp; )(.*) &gt; -?[0-9]+ &amp;.*&amp; \\2 &gt; -?[0-9]+($| &amp;&amp; )");<a name="line.473"></a>
+<span class="sourceLineNo">474</span>      useless_inv_pattern_2 =<a name="line.474"></a>
+<span class="sourceLineNo">475</span>          Pattern.compile("(^| &amp;&amp; )(.*) &lt; -?[0-9]+ &amp;.*&amp; \\2 &lt; -?[0-9]+($| &amp;&amp; )");<a name="line.475"></a>
+<span class="sourceLineNo">476</span>    } catch (PatternSyntaxException me) {<a name="line.476"></a>
+<span class="sourceLineNo">477</span>      throw new Error("ExtractConsequent: Error while compiling pattern " + me.getMessage());<a name="line.477"></a>
+<span class="sourceLineNo">478</span>    }<a name="line.478"></a>
+<span class="sourceLineNo">479</span>  }<a name="line.479"></a>
+<span class="sourceLineNo">480</span>}<a name="line.480"></a>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</pre>
+</div>
+</body>
+</html>

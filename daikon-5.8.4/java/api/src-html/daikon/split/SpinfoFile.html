@@ -1,0 +1,391 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<html lang="en">
+<head><link rel="icon" href="../../../daikon-favicon.png" type="image/png"/>
+<title>Source code</title>
+<link rel="stylesheet" type="text/css" href="../../../stylesheet.css" title="Style">
+</head>
+<body>
+<div class="sourceContainer">
+<pre><span class="sourceLineNo">001</span>package daikon.split;<a name="line.1"></a>
+<span class="sourceLineNo">002</span><a name="line.2"></a>
+<span class="sourceLineNo">003</span>import java.io.File;<a name="line.3"></a>
+<span class="sourceLineNo">004</span>import java.io.FileNotFoundException;<a name="line.4"></a>
+<span class="sourceLineNo">005</span>import java.io.IOException;<a name="line.5"></a>
+<span class="sourceLineNo">006</span>import java.io.LineNumberReader;<a name="line.6"></a>
+<span class="sourceLineNo">007</span>import java.util.ArrayList;<a name="line.7"></a>
+<span class="sourceLineNo">008</span>import java.util.List;<a name="line.8"></a>
+<span class="sourceLineNo">009</span>import jtb.ParseException;<a name="line.9"></a>
+<span class="sourceLineNo">010</span>import org.checkerframework.checker.initialization.qual.UnknownInitialization;<a name="line.10"></a>
+<span class="sourceLineNo">011</span>import org.checkerframework.checker.nullness.qual.EnsuresNonNull;<a name="line.11"></a>
+<span class="sourceLineNo">012</span>import org.checkerframework.checker.nullness.qual.EnsuresNonNullIf;<a name="line.12"></a>
+<span class="sourceLineNo">013</span>import org.checkerframework.checker.nullness.qual.Nullable;<a name="line.13"></a>
+<span class="sourceLineNo">014</span>import org.checkerframework.checker.nullness.qual.RequiresNonNull;<a name="line.14"></a>
+<span class="sourceLineNo">015</span>import org.checkerframework.dataflow.qual.Pure;<a name="line.15"></a>
+<span class="sourceLineNo">016</span>import org.plumelib.util.UtilPlume;<a name="line.16"></a>
+<span class="sourceLineNo">017</span><a name="line.17"></a>
+<span class="sourceLineNo">018</span>/**<a name="line.18"></a>
+<span class="sourceLineNo">019</span> * SpinfoFile stores information parsed from a {@code .spinfo} file. The constructor parses the<a name="line.19"></a>
+<span class="sourceLineNo">020</span> * file; then clients can make calls to retrieve the parsed information.<a name="line.20"></a>
+<span class="sourceLineNo">021</span> *<a name="line.21"></a>
+<span class="sourceLineNo">022</span> * &lt;p&gt;This file uses the term "ppt section" and "replace section" to describe what is refered to as<a name="line.22"></a>
+<span class="sourceLineNo">023</span> * a "Program Point Section" and "replacement sections" in the Daikon User Manual, respectively. A<a name="line.23"></a>
+<span class="sourceLineNo">024</span> * "ppt statement" is a single line from a "ppt section".<a name="line.24"></a>
+<span class="sourceLineNo">025</span> */<a name="line.25"></a>
+<span class="sourceLineNo">026</span>public class SpinfoFile {<a name="line.26"></a>
+<span class="sourceLineNo">027</span><a name="line.27"></a>
+<span class="sourceLineNo">028</span>  /** The path of the file being parsed. This is used only for debugging output. */<a name="line.28"></a>
+<span class="sourceLineNo">029</span>  private String spinfoFileName;<a name="line.29"></a>
+<span class="sourceLineNo">030</span><a name="line.30"></a>
+<span class="sourceLineNo">031</span>  /** The directory in which the java files for the splitters are kept. */<a name="line.31"></a>
+<span class="sourceLineNo">032</span>  private String tempDir;<a name="line.32"></a>
+<span class="sourceLineNo">033</span><a name="line.33"></a>
+<span class="sourceLineNo">034</span>  /** A Replacer constructed out of the replace statements from the spinfo file. */<a name="line.34"></a>
+<span class="sourceLineNo">035</span>  // It is set by parseFile(), which is called by the constructor.<a name="line.35"></a>
+<span class="sourceLineNo">036</span>  private StatementReplacer statementReplacer;<a name="line.36"></a>
+<span class="sourceLineNo">037</span><a name="line.37"></a>
+<span class="sourceLineNo">038</span>  /**<a name="line.38"></a>
+<span class="sourceLineNo">039</span>   * splitterObjects is an array of arrays of SplitterObjects where each array of SplitterObjects<a name="line.39"></a>
+<span class="sourceLineNo">040</span>   * contains all the SplitterObjects for a single Ppt.<a name="line.40"></a>
+<span class="sourceLineNo">041</span>   */<a name="line.41"></a>
+<span class="sourceLineNo">042</span>  // It is set by parseFile(), which is called by the constructor.<a name="line.42"></a>
+<span class="sourceLineNo">043</span>  // Invariant: for all i, j, and k:<a name="line.43"></a>
+<span class="sourceLineNo">044</span>  // splitterObject[i][j].getPptName() == splitterObject[i][k].getPptName()<a name="line.44"></a>
+<span class="sourceLineNo">045</span>  // splitterObject[i][k].getPptName() != splitterObject[j][k].getPptName() || i = j<a name="line.45"></a>
+<span class="sourceLineNo">046</span>  private SplitterObject[][] splitterObjects;<a name="line.46"></a>
+<span class="sourceLineNo">047</span><a name="line.47"></a>
+<span class="sourceLineNo">048</span>  private static String lineSep = System.lineSeparator();<a name="line.48"></a>
+<span class="sourceLineNo">049</span><a name="line.49"></a>
+<span class="sourceLineNo">050</span>  /**<a name="line.50"></a>
+<span class="sourceLineNo">051</span>   * Parses file spinfoFile.<a name="line.51"></a>
+<span class="sourceLineNo">052</span>   *<a name="line.52"></a>
+<span class="sourceLineNo">053</span>   * @param spinfoFile the file to be parsed<a name="line.53"></a>
+<span class="sourceLineNo">054</span>   * @param tempDir the directory in which the splitters' java files are created<a name="line.54"></a>
+<span class="sourceLineNo">055</span>   */<a name="line.55"></a>
+<span class="sourceLineNo">056</span>  SpinfoFile(File spinfoFile, String tempDir) {<a name="line.56"></a>
+<span class="sourceLineNo">057</span>    this.tempDir = tempDir;<a name="line.57"></a>
+<span class="sourceLineNo">058</span>    this.spinfoFileName = spinfoFile.toString();<a name="line.58"></a>
+<span class="sourceLineNo">059</span>    try {<a name="line.59"></a>
+<span class="sourceLineNo">060</span>      LineNumberReader reader = UtilPlume.lineNumberFileReader(spinfoFile);<a name="line.60"></a>
+<span class="sourceLineNo">061</span>      parseFile(reader);<a name="line.61"></a>
+<span class="sourceLineNo">062</span>    } catch (FileNotFoundException e) {<a name="line.62"></a>
+<span class="sourceLineNo">063</span>      throw new RuntimeException(e);<a name="line.63"></a>
+<span class="sourceLineNo">064</span>    } catch (IOException e) {<a name="line.64"></a>
+<span class="sourceLineNo">065</span>      throw new RuntimeException(e);<a name="line.65"></a>
+<span class="sourceLineNo">066</span>    }<a name="line.66"></a>
+<span class="sourceLineNo">067</span>  }<a name="line.67"></a>
+<span class="sourceLineNo">068</span><a name="line.68"></a>
+<span class="sourceLineNo">069</span>  /**<a name="line.69"></a>
+<span class="sourceLineNo">070</span>   * Gets the StatementReplacer for the replace statements in the file parsed.<a name="line.70"></a>
+<span class="sourceLineNo">071</span>   *<a name="line.71"></a>
+<span class="sourceLineNo">072</span>   * @return the Replacer for the replace statements in the file parsed<a name="line.72"></a>
+<span class="sourceLineNo">073</span>   */<a name="line.73"></a>
+<span class="sourceLineNo">074</span>  public StatementReplacer getReplacer() {<a name="line.74"></a>
+<span class="sourceLineNo">075</span>    return statementReplacer;<a name="line.75"></a>
+<span class="sourceLineNo">076</span>  }<a name="line.76"></a>
+<span class="sourceLineNo">077</span><a name="line.77"></a>
+<span class="sourceLineNo">078</span>  /**<a name="line.78"></a>
+<span class="sourceLineNo">079</span>   * Gets the SplitterObjects for the file parsed. For each Ppt in the spinfo file, one array of<a name="line.79"></a>
+<span class="sourceLineNo">080</span>   * SplitterObjects is created. This method returns an array of those arrays.<a name="line.80"></a>
+<span class="sourceLineNo">081</span>   *<a name="line.81"></a>
+<span class="sourceLineNo">082</span>   * @return the SplitterObjects for the file parsed<a name="line.82"></a>
+<span class="sourceLineNo">083</span>   */<a name="line.83"></a>
+<span class="sourceLineNo">084</span>  public SplitterObject[][] getSplitterObjects() {<a name="line.84"></a>
+<span class="sourceLineNo">085</span>    return splitterObjects;<a name="line.85"></a>
+<span class="sourceLineNo">086</span>  }<a name="line.86"></a>
+<span class="sourceLineNo">087</span><a name="line.87"></a>
+<span class="sourceLineNo">088</span>  /** Return the number of splitters (SplitterObject objects) represented by this file. */<a name="line.88"></a>
+<span class="sourceLineNo">089</span>  public int numSplittterObjects() {<a name="line.89"></a>
+<span class="sourceLineNo">090</span>    int result = 0;<a name="line.90"></a>
+<span class="sourceLineNo">091</span>    for (SplitterObject[] spa : splitterObjects) {<a name="line.91"></a>
+<span class="sourceLineNo">092</span>      result += spa.length;<a name="line.92"></a>
+<span class="sourceLineNo">093</span>    }<a name="line.93"></a>
+<span class="sourceLineNo">094</span>    return result;<a name="line.94"></a>
+<span class="sourceLineNo">095</span>  }<a name="line.95"></a>
+<span class="sourceLineNo">096</span><a name="line.96"></a>
+<span class="sourceLineNo">097</span>  /**<a name="line.97"></a>
+<span class="sourceLineNo">098</span>   * Return the number of splitters (SplitterObject objects) represented by all the files in the<a name="line.98"></a>
+<span class="sourceLineNo">099</span>   * list.<a name="line.99"></a>
+<span class="sourceLineNo">100</span>   */<a name="line.100"></a>
+<span class="sourceLineNo">101</span>  public static int numSplittterObjects(List&lt;SpinfoFile&gt; spinfoFiles) {<a name="line.101"></a>
+<span class="sourceLineNo">102</span>    int result = 0;<a name="line.102"></a>
+<span class="sourceLineNo">103</span>    for (SpinfoFile spf : spinfoFiles) {<a name="line.103"></a>
+<span class="sourceLineNo">104</span>      result += spf.numSplittterObjects();<a name="line.104"></a>
+<span class="sourceLineNo">105</span>    }<a name="line.105"></a>
+<span class="sourceLineNo">106</span>    return result;<a name="line.106"></a>
+<span class="sourceLineNo">107</span>  }<a name="line.107"></a>
+<span class="sourceLineNo">108</span><a name="line.108"></a>
+<span class="sourceLineNo">109</span>  /**<a name="line.109"></a>
+<span class="sourceLineNo">110</span>   * parseFile sets the member fields statementReplacer and splitterObjects, from the spinfoFile.<a name="line.110"></a>
+<span class="sourceLineNo">111</span>   *<a name="line.111"></a>
+<span class="sourceLineNo">112</span>   * @param spinfoFile a LineNumberReader for the spinfo file being parsed<a name="line.112"></a>
+<span class="sourceLineNo">113</span>   * @throws IOException if an I/O error occurs<a name="line.113"></a>
+<span class="sourceLineNo">114</span>   */<a name="line.114"></a>
+<span class="sourceLineNo">115</span>  @RequiresNonNull("tempDir")<a name="line.115"></a>
+<span class="sourceLineNo">116</span>  @EnsuresNonNull({"statementReplacer", "splitterObjects"})<a name="line.116"></a>
+<span class="sourceLineNo">117</span>  public void parseFile(@UnknownInitialization SpinfoFile this, LineNumberReader spinfoFile)<a name="line.117"></a>
+<span class="sourceLineNo">118</span>      throws IOException {<a name="line.118"></a>
+<span class="sourceLineNo">119</span>    List&lt;ReplaceStatement&gt; replaceStatements = new ArrayList&lt;&gt;();<a name="line.119"></a>
+<span class="sourceLineNo">120</span>    List&lt;List&lt;String&gt;&gt; pptSections = new ArrayList&lt;&gt;();<a name="line.120"></a>
+<span class="sourceLineNo">121</span>    try {<a name="line.121"></a>
+<span class="sourceLineNo">122</span>      String line = spinfoFile.readLine();<a name="line.122"></a>
+<span class="sourceLineNo">123</span>      while (line != null) {<a name="line.123"></a>
+<span class="sourceLineNo">124</span>        line = line.trim();<a name="line.124"></a>
+<span class="sourceLineNo">125</span>        if (isComment(line) || line.equals("")) {<a name="line.125"></a>
+<span class="sourceLineNo">126</span>          // nothing to do<a name="line.126"></a>
+<span class="sourceLineNo">127</span>        } else if (line.equals("REPLACE")) {<a name="line.127"></a>
+<span class="sourceLineNo">128</span>          readReplaceStatements(spinfoFile, replaceStatements);<a name="line.128"></a>
+<span class="sourceLineNo">129</span>        } else if (line.startsWith("PPT_NAME")) {<a name="line.129"></a>
+<span class="sourceLineNo">130</span>          line = line.substring("PPT_NAME".length()).trim();<a name="line.130"></a>
+<span class="sourceLineNo">131</span>          readPptStatements(spinfoFile, pptSections, line);<a name="line.131"></a>
+<span class="sourceLineNo">132</span>        } else {<a name="line.132"></a>
+<span class="sourceLineNo">133</span>          throw new RuntimeException(<a name="line.133"></a>
+<span class="sourceLineNo">134</span>              "Illegal file format in: "<a name="line.134"></a>
+<span class="sourceLineNo">135</span>                  + spinfoFileName<a name="line.135"></a>
+<span class="sourceLineNo">136</span>                  + lineSep<a name="line.136"></a>
+<span class="sourceLineNo">137</span>                  + "at: "<a name="line.137"></a>
+<span class="sourceLineNo">138</span>                  + spinfoFile.getLineNumber()<a name="line.138"></a>
+<span class="sourceLineNo">139</span>                  + lineSep<a name="line.139"></a>
+<span class="sourceLineNo">140</span>                  + line);<a name="line.140"></a>
+<span class="sourceLineNo">141</span>        }<a name="line.141"></a>
+<span class="sourceLineNo">142</span>        line = spinfoFile.readLine();<a name="line.142"></a>
+<span class="sourceLineNo">143</span>      }<a name="line.143"></a>
+<span class="sourceLineNo">144</span>    } catch (IOException ioe) {<a name="line.144"></a>
+<span class="sourceLineNo">145</span>      //  System.err.println(ioe);<a name="line.145"></a>
+<span class="sourceLineNo">146</span>      System.err.println("Error in " + spinfoFileName);<a name="line.146"></a>
+<span class="sourceLineNo">147</span>      System.err.println(" at line number " + spinfoFile.getLineNumber() + " of .spinfo file");<a name="line.147"></a>
+<span class="sourceLineNo">148</span>      throw new RuntimeException(ioe);<a name="line.148"></a>
+<span class="sourceLineNo">149</span>    } catch (ParseException e) {<a name="line.149"></a>
+<span class="sourceLineNo">150</span>      //  System.err.println(ioe);<a name="line.150"></a>
+<span class="sourceLineNo">151</span>      System.err.println("Error in " + spinfoFileName);<a name="line.151"></a>
+<span class="sourceLineNo">152</span>      System.err.println(" at line number " + spinfoFile.getLineNumber() + " of .spinfo file");<a name="line.152"></a>
+<span class="sourceLineNo">153</span>      throw new RuntimeException(e);<a name="line.153"></a>
+<span class="sourceLineNo">154</span>    }<a name="line.154"></a>
+<span class="sourceLineNo">155</span>    statementReplacer = new StatementReplacer(replaceStatements);<a name="line.155"></a>
+<span class="sourceLineNo">156</span>    splitterObjects = createSplitterObjects(pptSections);<a name="line.156"></a>
+<span class="sourceLineNo">157</span>  }<a name="line.157"></a>
+<span class="sourceLineNo">158</span><a name="line.158"></a>
+<span class="sourceLineNo">159</span>  /**<a name="line.159"></a>
+<span class="sourceLineNo">160</span>   * Reads a group of replace statement lines. The method declaration and the return statement of a<a name="line.160"></a>
+<span class="sourceLineNo">161</span>   * replace statement is placed in a ReplaceStatement. The ReplaceStatements are then placed into<a name="line.161"></a>
+<span class="sourceLineNo">162</span>   * replaceStatements.<a name="line.162"></a>
+<span class="sourceLineNo">163</span>   *<a name="line.163"></a>
+<span class="sourceLineNo">164</span>   * @param spinfoFile a LineNumberReader for the spinfo file being parsed<a name="line.164"></a>
+<span class="sourceLineNo">165</span>   * @param replaceStatements the List into which the ReplaceStatements are added<a name="line.165"></a>
+<span class="sourceLineNo">166</span>   */<a name="line.166"></a>
+<span class="sourceLineNo">167</span>  private void readReplaceStatements(<a name="line.167"></a>
+<span class="sourceLineNo">168</span>      @UnknownInitialization SpinfoFile this,<a name="line.168"></a>
+<span class="sourceLineNo">169</span>      LineNumberReader spinfoFile,<a name="line.169"></a>
+<span class="sourceLineNo">170</span>      List&lt;ReplaceStatement&gt; replaceStatements)<a name="line.170"></a>
+<span class="sourceLineNo">171</span>      throws IOException, ParseException {<a name="line.171"></a>
+<span class="sourceLineNo">172</span>    String methodDeclaration = spinfoFile.readLine();<a name="line.172"></a>
+<span class="sourceLineNo">173</span>    while (!isBlank(methodDeclaration)) {<a name="line.173"></a>
+<span class="sourceLineNo">174</span>      String returnStatement = spinfoFile.readLine();<a name="line.174"></a>
+<span class="sourceLineNo">175</span>      if (isBlank(returnStatement)) {<a name="line.175"></a>
+<span class="sourceLineNo">176</span>        throw new RuntimeException(<a name="line.176"></a>
+<span class="sourceLineNo">177</span>            "MalFormed .spinfo file in: "<a name="line.177"></a>
+<span class="sourceLineNo">178</span>                + spinfoFileName<a name="line.178"></a>
+<span class="sourceLineNo">179</span>                + lineSep<a name="line.179"></a>
+<span class="sourceLineNo">180</span>                + (spinfoFile.getLineNumber() - 1)<a name="line.180"></a>
+<span class="sourceLineNo">181</span>                + lineSep<a name="line.181"></a>
+<span class="sourceLineNo">182</span>                + methodDeclaration<a name="line.182"></a>
+<span class="sourceLineNo">183</span>                + lineSep<a name="line.183"></a>
+<span class="sourceLineNo">184</span>                + "Each replace statement must be a pair of lines.");<a name="line.184"></a>
+<span class="sourceLineNo">185</span>      }<a name="line.185"></a>
+<span class="sourceLineNo">186</span>      ReplaceStatement replaceStatement =<a name="line.186"></a>
+<span class="sourceLineNo">187</span>          new ReplaceStatement(methodDeclaration.trim(), returnStatement.trim());<a name="line.187"></a>
+<span class="sourceLineNo">188</span>      replaceStatements.add(replaceStatement);<a name="line.188"></a>
+<span class="sourceLineNo">189</span>      methodDeclaration = spinfoFile.readLine();<a name="line.189"></a>
+<span class="sourceLineNo">190</span>    }<a name="line.190"></a>
+<span class="sourceLineNo">191</span>  }<a name="line.191"></a>
+<span class="sourceLineNo">192</span><a name="line.192"></a>
+<span class="sourceLineNo">193</span>  /**<a name="line.193"></a>
+<span class="sourceLineNo">194</span>   * Reads a group of Ppt statements (statements following the line "PPT_NAME..."). Makes a list<a name="line.194"></a>
+<span class="sourceLineNo">195</span>   * whose first element is the name on the PPT_NAME line (but without the "PPT_NAME" prefix), and<a name="line.195"></a>
+<span class="sourceLineNo">196</span>   * whose additional elements are all the non-empty lines up to the next empty line. Puts this list<a name="line.196"></a>
+<span class="sourceLineNo">197</span>   * in pptSections.<a name="line.197"></a>
+<span class="sourceLineNo">198</span>   *<a name="line.198"></a>
+<span class="sourceLineNo">199</span>   * @param spinfoFile a LineNumberReader for the spinfo file being parsed<a name="line.199"></a>
+<span class="sourceLineNo">200</span>   * @param pptSections the List into which the List of lines for this pptSection are to be added<a name="line.200"></a>
+<span class="sourceLineNo">201</span>   * @param pptName name of the ppt<a name="line.201"></a>
+<span class="sourceLineNo">202</span>   * @throws IOException if an I/O error occurs.<a name="line.202"></a>
+<span class="sourceLineNo">203</span>   */<a name="line.203"></a>
+<span class="sourceLineNo">204</span>  private void readPptStatements(<a name="line.204"></a>
+<span class="sourceLineNo">205</span>      @UnknownInitialization SpinfoFile this,<a name="line.205"></a>
+<span class="sourceLineNo">206</span>      LineNumberReader spinfoFile,<a name="line.206"></a>
+<span class="sourceLineNo">207</span>      List&lt;List&lt;String&gt;&gt; pptSections,<a name="line.207"></a>
+<span class="sourceLineNo">208</span>      String pptName)<a name="line.208"></a>
+<span class="sourceLineNo">209</span>      throws IOException {<a name="line.209"></a>
+<span class="sourceLineNo">210</span>    List&lt;String&gt; pptSection = new ArrayList&lt;&gt;();<a name="line.210"></a>
+<span class="sourceLineNo">211</span>    pptSection.add(pptName);<a name="line.211"></a>
+<span class="sourceLineNo">212</span>    String line = spinfoFile.readLine();<a name="line.212"></a>
+<span class="sourceLineNo">213</span>    while ((line != null) &amp;&amp; !line.trim().equals("")) {<a name="line.213"></a>
+<span class="sourceLineNo">214</span>      pptSection.add(line);<a name="line.214"></a>
+<span class="sourceLineNo">215</span>      line = spinfoFile.readLine();<a name="line.215"></a>
+<span class="sourceLineNo">216</span>    }<a name="line.216"></a>
+<span class="sourceLineNo">217</span>    pptSections.add(pptSection);<a name="line.217"></a>
+<span class="sourceLineNo">218</span>  }<a name="line.218"></a>
+<span class="sourceLineNo">219</span><a name="line.219"></a>
+<span class="sourceLineNo">220</span>  /**<a name="line.220"></a>
+<span class="sourceLineNo">221</span>   * Creates the SplitterObjects for the Ppt section in pptSections.<a name="line.221"></a>
+<span class="sourceLineNo">222</span>   *<a name="line.222"></a>
+<span class="sourceLineNo">223</span>   * @param pptSections is a List of Lists of Strings. Each list should include all the lines from a<a name="line.223"></a>
+<span class="sourceLineNo">224</span>   *     single Ppt Section. This includes the first line, but without the prefix "PPT_NAME"<a name="line.224"></a>
+<span class="sourceLineNo">225</span>   * @return an array of arrays with each array containing the SplitterObjects for one of lists of<a name="line.225"></a>
+<span class="sourceLineNo">226</span>   *     ppt statements found in pptSections<a name="line.226"></a>
+<span class="sourceLineNo">227</span>   */<a name="line.227"></a>
+<span class="sourceLineNo">228</span>  @RequiresNonNull("tempDir")<a name="line.228"></a>
+<span class="sourceLineNo">229</span>  private SplitterObject[][] createSplitterObjects(<a name="line.229"></a>
+<span class="sourceLineNo">230</span>      @UnknownInitialization SpinfoFile this, List&lt;List&lt;String&gt;&gt; pptSections) {<a name="line.230"></a>
+<span class="sourceLineNo">231</span>    List&lt;SplitterObject[]&gt; splittersForAllPpts = new ArrayList&lt;&gt;();<a name="line.231"></a>
+<span class="sourceLineNo">232</span>    for (List&lt;String&gt; pptSection : pptSections) {<a name="line.232"></a>
+<span class="sourceLineNo">233</span>      List&lt;SplitterObject&gt; splittersForThisPpt = new ArrayList&lt;&gt;();<a name="line.233"></a>
+<span class="sourceLineNo">234</span>      if (pptSection.size() &gt; 0) {<a name="line.234"></a>
+<span class="sourceLineNo">235</span>        String pptName = pptSection.get(0).trim();<a name="line.235"></a>
+<span class="sourceLineNo">236</span>        SplitterObject splitObj = null;<a name="line.236"></a>
+<span class="sourceLineNo">237</span>        for (int j = 1; j &lt; pptSection.size(); j++) {<a name="line.237"></a>
+<span class="sourceLineNo">238</span>          String pptStatement = pptSection.get(j);<a name="line.238"></a>
+<span class="sourceLineNo">239</span>          if (isComment(pptStatement)) {<a name="line.239"></a>
+<span class="sourceLineNo">240</span>            // nothing to do<a name="line.240"></a>
+<span class="sourceLineNo">241</span>          } else if (isFormatting(pptStatement)) {<a name="line.241"></a>
+<span class="sourceLineNo">242</span>            if (splitObj == null) {<a name="line.242"></a>
+<span class="sourceLineNo">243</span>              throw new RuntimeException(<a name="line.243"></a>
+<span class="sourceLineNo">244</span>                  "Malformed Spinfo file: "<a name="line.244"></a>
+<span class="sourceLineNo">245</span>                      + spinfoFileName<a name="line.245"></a>
+<span class="sourceLineNo">246</span>                      + lineSep<a name="line.246"></a>
+<span class="sourceLineNo">247</span>                      + "Indented format specification, "<a name="line.247"></a>
+<span class="sourceLineNo">248</span>                      + pptStatement<a name="line.248"></a>
+<span class="sourceLineNo">249</span>                      + ", must follow an unindented condition"<a name="line.249"></a>
+<span class="sourceLineNo">250</span>                      + lineSep<a name="line.250"></a>
+<span class="sourceLineNo">251</span>                      + "For details, see the Daikon manual, section \"Splitter info file\"");<a name="line.251"></a>
+<span class="sourceLineNo">252</span>            } else {<a name="line.252"></a>
+<span class="sourceLineNo">253</span>              setFormatting(splitObj, pptStatement.trim());<a name="line.253"></a>
+<span class="sourceLineNo">254</span>            }<a name="line.254"></a>
+<span class="sourceLineNo">255</span>          } else {<a name="line.255"></a>
+<span class="sourceLineNo">256</span>            splitObj = new SplitterObject(pptName, pptStatement.trim(), tempDir);<a name="line.256"></a>
+<span class="sourceLineNo">257</span>            splittersForThisPpt.add(splitObj);<a name="line.257"></a>
+<span class="sourceLineNo">258</span>          }<a name="line.258"></a>
+<span class="sourceLineNo">259</span>        }<a name="line.259"></a>
+<span class="sourceLineNo">260</span>      }<a name="line.260"></a>
+<span class="sourceLineNo">261</span>      splittersForAllPpts.add(splittersForThisPpt.toArray(new SplitterObject[0]));<a name="line.261"></a>
+<span class="sourceLineNo">262</span>    }<a name="line.262"></a>
+<span class="sourceLineNo">263</span>    return splittersForAllPpts.toArray(new SplitterObject[0][0]);<a name="line.263"></a>
+<span class="sourceLineNo">264</span>  }<a name="line.264"></a>
+<span class="sourceLineNo">265</span><a name="line.265"></a>
+<span class="sourceLineNo">266</span>  /**<a name="line.266"></a>
+<span class="sourceLineNo">267</span>   * Updates obj's fields to take in account the formatting command given by command. If the command<a name="line.267"></a>
+<span class="sourceLineNo">268</span>   * is invalid an error message is given. Extra white space is ignored.<a name="line.268"></a>
+<span class="sourceLineNo">269</span>   *<a name="line.269"></a>
+<span class="sourceLineNo">270</span>   * @param obj the splitterObject for which command is intended<a name="line.270"></a>
+<span class="sourceLineNo">271</span>   * @param command the formatting command to be applied to obj<a name="line.271"></a>
+<span class="sourceLineNo">272</span>   */<a name="line.272"></a>
+<span class="sourceLineNo">273</span>  private static void setFormatting(SplitterObject obj, String command) {<a name="line.273"></a>
+<span class="sourceLineNo">274</span>    command = command.trim();<a name="line.274"></a>
+<span class="sourceLineNo">275</span>    if (command.startsWith("DAIKON_FORMAT")) {<a name="line.275"></a>
+<span class="sourceLineNo">276</span>      obj.daikonFormat = command.substring("DAIKON_FORMAT".length()).trim();<a name="line.276"></a>
+<span class="sourceLineNo">277</span>      obj.dummyDesired = true;<a name="line.277"></a>
+<span class="sourceLineNo">278</span>    } else if (command.startsWith("JAVA_FORMAT")) {<a name="line.278"></a>
+<span class="sourceLineNo">279</span>      obj.javaFormat = command.substring("JAVA_FORMAT".length()).trim();<a name="line.279"></a>
+<span class="sourceLineNo">280</span>      obj.dummyDesired = true;<a name="line.280"></a>
+<span class="sourceLineNo">281</span>    } else if (command.startsWith("ESC_FORMAT")) {<a name="line.281"></a>
+<span class="sourceLineNo">282</span>      obj.escFormat = command.substring("ESC_FORMAT".length()).trim();<a name="line.282"></a>
+<span class="sourceLineNo">283</span>      obj.dummyDesired = true;<a name="line.283"></a>
+<span class="sourceLineNo">284</span>    } else if (command.startsWith("SIMPLIFY_FORMAT")) {<a name="line.284"></a>
+<span class="sourceLineNo">285</span>      obj.simplifyFormat = command.substring("SIMPLIFY_FORMAT".length()).trim();<a name="line.285"></a>
+<span class="sourceLineNo">286</span>      obj.dummyDesired = true;<a name="line.286"></a>
+<span class="sourceLineNo">287</span>    } else if (command.startsWith("CSHARPCONTRACT_FORMAT")) {<a name="line.287"></a>
+<span class="sourceLineNo">288</span>      obj.csharpFormat = command.substring("CSHARPCONTRACT_FORMAT".length()).trim();<a name="line.288"></a>
+<span class="sourceLineNo">289</span>      obj.dummyDesired = true;<a name="line.289"></a>
+<span class="sourceLineNo">290</span>    } else {<a name="line.290"></a>
+<span class="sourceLineNo">291</span>      System.err.println("Unrecognized format spec in .spinfo: " + command);<a name="line.291"></a>
+<span class="sourceLineNo">292</span>    }<a name="line.292"></a>
+<span class="sourceLineNo">293</span>  }<a name="line.293"></a>
+<span class="sourceLineNo">294</span><a name="line.294"></a>
+<span class="sourceLineNo">295</span>  /** Returns whether the line is blank (or null). */<a name="line.295"></a>
+<span class="sourceLineNo">296</span>  @EnsuresNonNullIf(result = false, expression = "#1")<a name="line.296"></a>
+<span class="sourceLineNo">297</span>  @Pure<a name="line.297"></a>
+<span class="sourceLineNo">298</span>  private static boolean isBlank(@Nullable String line) {<a name="line.298"></a>
+<span class="sourceLineNo">299</span>    return (line == null) || line.trim().equals("");<a name="line.299"></a>
+<span class="sourceLineNo">300</span>  }<a name="line.300"></a>
+<span class="sourceLineNo">301</span><a name="line.301"></a>
+<span class="sourceLineNo">302</span>  /**<a name="line.302"></a>
+<span class="sourceLineNo">303</span>   * Returns whether the line is a spinfo file comment line. A line is a comment if it starts with a<a name="line.303"></a>
+<span class="sourceLineNo">304</span>   * (possibly indented) "#".<a name="line.304"></a>
+<span class="sourceLineNo">305</span>   */<a name="line.305"></a>
+<span class="sourceLineNo">306</span>  @Pure<a name="line.306"></a>
+<span class="sourceLineNo">307</span>  private static boolean isComment(String line) {<a name="line.307"></a>
+<span class="sourceLineNo">308</span>    return (line.trim().startsWith("#"));<a name="line.308"></a>
+<span class="sourceLineNo">309</span>  }<a name="line.309"></a>
+<span class="sourceLineNo">310</span><a name="line.310"></a>
+<span class="sourceLineNo">311</span>  /**<a name="line.311"></a>
+<span class="sourceLineNo">312</span>   * Returns whether the line is a spinfo file formatting command. A line is a formatting command if<a name="line.312"></a>
+<span class="sourceLineNo">313</span>   * line is indented with a tab ("\t") or spaces (" ").<a name="line.313"></a>
+<span class="sourceLineNo">314</span>   */<a name="line.314"></a>
+<span class="sourceLineNo">315</span>  @Pure<a name="line.315"></a>
+<span class="sourceLineNo">316</span>  private static boolean isFormatting(String line) {<a name="line.316"></a>
+<span class="sourceLineNo">317</span>    return (line.startsWith("\t") || line.startsWith(" "));<a name="line.317"></a>
+<span class="sourceLineNo">318</span>  }<a name="line.318"></a>
+<span class="sourceLineNo">319</span>}<a name="line.319"></a>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</pre>
+</div>
+</body>
+</html>

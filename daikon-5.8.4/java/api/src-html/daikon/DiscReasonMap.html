@@ -1,0 +1,273 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<html lang="en">
+<head><link rel="icon" href="../../daikon-favicon.png" type="image/png"/>
+<title>Source code</title>
+<link rel="stylesheet" type="text/css" href="../../stylesheet.css" title="Style">
+</head>
+<body>
+<div class="sourceContainer">
+<pre><span class="sourceLineNo">001</span>package daikon;<a name="line.1"></a>
+<span class="sourceLineNo">002</span><a name="line.2"></a>
+<span class="sourceLineNo">003</span>import daikon.inv.DiscardCode;<a name="line.3"></a>
+<span class="sourceLineNo">004</span>import daikon.inv.DiscardInfo;<a name="line.4"></a>
+<span class="sourceLineNo">005</span>import daikon.inv.Invariant;<a name="line.5"></a>
+<span class="sourceLineNo">006</span>import daikon.inv.InvariantInfo;<a name="line.6"></a>
+<span class="sourceLineNo">007</span>import java.util.ArrayList;<a name="line.7"></a>
+<span class="sourceLineNo">008</span>import java.util.HashMap;<a name="line.8"></a>
+<span class="sourceLineNo">009</span>import java.util.List;<a name="line.9"></a>
+<span class="sourceLineNo">010</span>import org.checkerframework.checker.nullness.qual.EnsuresNonNull;<a name="line.10"></a>
+<span class="sourceLineNo">011</span>import org.checkerframework.checker.nullness.qual.NonNull;<a name="line.11"></a>
+<span class="sourceLineNo">012</span><a name="line.12"></a>
+<span class="sourceLineNo">013</span>public final class DiscReasonMap {<a name="line.13"></a>
+<span class="sourceLineNo">014</span><a name="line.14"></a>
+<span class="sourceLineNo">015</span>  // Key: PptTopLevel name string<a name="line.15"></a>
+<span class="sourceLineNo">016</span>  // Value: HashMap, such that:<a name="line.16"></a>
+<span class="sourceLineNo">017</span>  //    Key: String containing variable names separated by commas,<a name="line.17"></a>
+<span class="sourceLineNo">018</span>  //      e.g. "this.head, this.tail" (names appear in sorted order).<a name="line.18"></a>
+<span class="sourceLineNo">019</span>  //    Value:  list containing DiscardInfo's for all Invariants using<a name="line.19"></a>
+<span class="sourceLineNo">020</span>  //      those variable names in that PptTopLevel.<a name="line.20"></a>
+<span class="sourceLineNo">021</span>  private static HashMap&lt;String, HashMap&lt;String, List&lt;DiscardInfo&gt;&gt;&gt; the_map;<a name="line.21"></a>
+<span class="sourceLineNo">022</span><a name="line.22"></a>
+<span class="sourceLineNo">023</span>  // This seems to be a gross singleton pattern.<a name="line.23"></a>
+<span class="sourceLineNo">024</span>  static {<a name="line.24"></a>
+<span class="sourceLineNo">025</span>    initialize();<a name="line.25"></a>
+<span class="sourceLineNo">026</span>  }<a name="line.26"></a>
+<span class="sourceLineNo">027</span><a name="line.27"></a>
+<span class="sourceLineNo">028</span>  private DiscReasonMap() {<a name="line.28"></a>
+<span class="sourceLineNo">029</span>    // Use initialize();<a name="line.29"></a>
+<span class="sourceLineNo">030</span>  }<a name="line.30"></a>
+<span class="sourceLineNo">031</span><a name="line.31"></a>
+<span class="sourceLineNo">032</span>  @EnsuresNonNull("the_map")<a name="line.32"></a>
+<span class="sourceLineNo">033</span>  public static void initialize() {<a name="line.33"></a>
+<span class="sourceLineNo">034</span>    the_map = new HashMap&lt;&gt;();<a name="line.34"></a>
+<span class="sourceLineNo">035</span>  }<a name="line.35"></a>
+<span class="sourceLineNo">036</span><a name="line.36"></a>
+<span class="sourceLineNo">037</span>  /**<a name="line.37"></a>
+<span class="sourceLineNo">038</span>   * Adds disc_info to DiscReasonMap's internal data structure, unless a reason already exists for<a name="line.38"></a>
+<span class="sourceLineNo">039</span>   * inv, in which case the old reason is kept and disc_info is discarded.<a name="line.39"></a>
+<span class="sourceLineNo">040</span>   *<a name="line.40"></a>
+<span class="sourceLineNo">041</span>   * &lt;p&gt;Requires: inv != null &amp;and; disc_info != null &amp;and; disc_info.shouldDiscard()<a name="line.41"></a>
+<span class="sourceLineNo">042</span>   */<a name="line.42"></a>
+<span class="sourceLineNo">043</span>  public static void put(Invariant inv, DiscardInfo disc_info) {<a name="line.43"></a>
+<span class="sourceLineNo">044</span>    if (!PrintInvariants.print_discarded_invariants) {<a name="line.44"></a>
+<span class="sourceLineNo">045</span>      return;<a name="line.45"></a>
+<span class="sourceLineNo">046</span>    }<a name="line.46"></a>
+<span class="sourceLineNo">047</span><a name="line.47"></a>
+<span class="sourceLineNo">048</span>    assert disc_info != null;<a name="line.48"></a>
+<span class="sourceLineNo">049</span><a name="line.49"></a>
+<span class="sourceLineNo">050</span>    // Let's not keep track of DiscardInfo's from Invariants who have<a name="line.50"></a>
+<span class="sourceLineNo">051</span>    // any repeated variables since we don't expect them to print anyway<a name="line.51"></a>
+<span class="sourceLineNo">052</span>    for (int i = 1; i &lt; inv.ppt.var_infos.length; i++) {<a name="line.52"></a>
+<span class="sourceLineNo">053</span>      if (inv.ppt.var_infos[i] == inv.ppt.var_infos[i - 1]) {<a name="line.53"></a>
+<span class="sourceLineNo">054</span>        return;<a name="line.54"></a>
+<span class="sourceLineNo">055</span>      }<a name="line.55"></a>
+<span class="sourceLineNo">056</span>    }<a name="line.56"></a>
+<span class="sourceLineNo">057</span><a name="line.57"></a>
+<span class="sourceLineNo">058</span>    if (inv.ppt.var_infos.length == 0) {<a name="line.58"></a>
+<span class="sourceLineNo">059</span>      System.out.println("no var infos");<a name="line.59"></a>
+<span class="sourceLineNo">060</span>      return;<a name="line.60"></a>
+<span class="sourceLineNo">061</span>    }<a name="line.61"></a>
+<span class="sourceLineNo">062</span>    String vars_result = inv.ppt.var_infos[0].name();<a name="line.62"></a>
+<span class="sourceLineNo">063</span>    for (int i = 1; i &lt; inv.ppt.var_infos.length; i++) {<a name="line.63"></a>
+<span class="sourceLineNo">064</span>      vars_result += "," + inv.ppt.var_infos[i].name();<a name="line.64"></a>
+<span class="sourceLineNo">065</span>    }<a name="line.65"></a>
+<span class="sourceLineNo">066</span>    put(vars_result, inv.ppt.parent.name, disc_info);<a name="line.66"></a>
+<span class="sourceLineNo">067</span>  }<a name="line.67"></a>
+<span class="sourceLineNo">068</span><a name="line.68"></a>
+<span class="sourceLineNo">069</span>  public static void put(Invariant inv, DiscardCode discardCode, String discardString) {<a name="line.69"></a>
+<span class="sourceLineNo">070</span>    if (!PrintInvariants.print_discarded_invariants) {<a name="line.70"></a>
+<span class="sourceLineNo">071</span>      return;<a name="line.71"></a>
+<span class="sourceLineNo">072</span>    }<a name="line.72"></a>
+<span class="sourceLineNo">073</span><a name="line.73"></a>
+<span class="sourceLineNo">074</span>    put(inv, new DiscardInfo(inv, discardCode, discardString));<a name="line.74"></a>
+<span class="sourceLineNo">075</span>  }<a name="line.75"></a>
+<span class="sourceLineNo">076</span><a name="line.76"></a>
+<span class="sourceLineNo">077</span>  public static void put(String vars, String ppt, DiscardInfo disc_info) {<a name="line.77"></a>
+<span class="sourceLineNo">078</span>    if (!PrintInvariants.print_discarded_invariants) {<a name="line.78"></a>
+<span class="sourceLineNo">079</span>      return;<a name="line.79"></a>
+<span class="sourceLineNo">080</span>    }<a name="line.80"></a>
+<span class="sourceLineNo">081</span><a name="line.81"></a>
+<span class="sourceLineNo">082</span>    assert disc_info != null;<a name="line.82"></a>
+<span class="sourceLineNo">083</span><a name="line.83"></a>
+<span class="sourceLineNo">084</span>    // Get the vars out of inv in our proper format<a name="line.84"></a>
+<span class="sourceLineNo">085</span>    // I should move this var_sorting stuff to a central<a name="line.85"></a>
+<span class="sourceLineNo">086</span>    // place soon since it's being used kind of frequently<a name="line.86"></a>
+<span class="sourceLineNo">087</span>    /*StringTokenizer st = new StringTokenizer(vars, ",");<a name="line.87"></a>
+<span class="sourceLineNo">088</span>    ArrayList&lt;String&gt; temp_vars = new ArrayList();<a name="line.88"></a>
+<span class="sourceLineNo">089</span>    while (st.hasMoreTokens()) {<a name="line.89"></a>
+<span class="sourceLineNo">090</span>      temp_vars.add(st.nextToken());<a name="line.90"></a>
+<span class="sourceLineNo">091</span>    }<a name="line.91"></a>
+<span class="sourceLineNo">092</span>    Collections.sort(temp_vars);<a name="line.92"></a>
+<span class="sourceLineNo">093</span>    String vars_result = "";<a name="line.93"></a>
+<span class="sourceLineNo">094</span>    for (String temp_var : temp_vars) {<a name="line.94"></a>
+<span class="sourceLineNo">095</span>      vars_result += temp_var + ",";<a name="line.95"></a>
+<span class="sourceLineNo">096</span>      }*/<a name="line.96"></a>
+<span class="sourceLineNo">097</span><a name="line.97"></a>
+<span class="sourceLineNo">098</span>    HashMap&lt;String, List&lt;DiscardInfo&gt;&gt; ppt_hashmap = the_map.get(ppt);<a name="line.98"></a>
+<span class="sourceLineNo">099</span>    if (ppt_hashmap != null) {<a name="line.99"></a>
+<span class="sourceLineNo">100</span>      List&lt;DiscardInfo&gt; disc_infos = ppt_hashmap.get(vars);<a name="line.100"></a>
+<span class="sourceLineNo">101</span>      if (disc_infos != null) {<a name="line.101"></a>
+<span class="sourceLineNo">102</span>        // Check to see if this invariant already has a DiscInfo<a name="line.102"></a>
+<span class="sourceLineNo">103</span>        for (DiscardInfo di : disc_infos) {<a name="line.103"></a>
+<span class="sourceLineNo">104</span>          if (disc_info.className().equals(di.className())) {<a name="line.104"></a>
+<span class="sourceLineNo">105</span>            // We already have a reason for why the Invariant was discarded<a name="line.105"></a>
+<span class="sourceLineNo">106</span>            // Perhaps we could replace it with the new reason, but maybe we<a name="line.106"></a>
+<span class="sourceLineNo">107</span>            // want to be able to "default" to reasons.  i.e., set less specific<a name="line.107"></a>
+<span class="sourceLineNo">108</span>            // reasons at the very end for everything not printed, just in case<a name="line.108"></a>
+<span class="sourceLineNo">109</span>            // some discarded invariants haven't had their reasons set yet.<a name="line.109"></a>
+<span class="sourceLineNo">110</span>            return;<a name="line.110"></a>
+<span class="sourceLineNo">111</span>          }<a name="line.111"></a>
+<span class="sourceLineNo">112</span>        }<a name="line.112"></a>
+<span class="sourceLineNo">113</span>        disc_infos.add(disc_info);<a name="line.113"></a>
+<span class="sourceLineNo">114</span>      } else {<a name="line.114"></a>
+<span class="sourceLineNo">115</span>        List&lt;DiscardInfo&gt; temp = new ArrayList&lt;&gt;(1);<a name="line.115"></a>
+<span class="sourceLineNo">116</span>        temp.add(disc_info);<a name="line.116"></a>
+<span class="sourceLineNo">117</span>        ppt_hashmap.put(vars, temp);<a name="line.117"></a>
+<span class="sourceLineNo">118</span>      }<a name="line.118"></a>
+<span class="sourceLineNo">119</span>    } else {<a name="line.119"></a>
+<span class="sourceLineNo">120</span>      // In case where nothing from this inv's PptTopLevel has been discarded yet<a name="line.120"></a>
+<span class="sourceLineNo">121</span>      HashMap&lt;String, List&lt;DiscardInfo&gt;&gt; new_map = new HashMap&lt;&gt;();<a name="line.121"></a>
+<span class="sourceLineNo">122</span>      List&lt;DiscardInfo&gt; temp = new ArrayList&lt;&gt;();<a name="line.122"></a>
+<span class="sourceLineNo">123</span>      temp.add(disc_info);<a name="line.123"></a>
+<span class="sourceLineNo">124</span>      new_map.put(vars, temp);<a name="line.124"></a>
+<span class="sourceLineNo">125</span>      the_map.put(ppt, new_map);<a name="line.125"></a>
+<span class="sourceLineNo">126</span>    }<a name="line.126"></a>
+<span class="sourceLineNo">127</span>  }<a name="line.127"></a>
+<span class="sourceLineNo">128</span><a name="line.128"></a>
+<span class="sourceLineNo">129</span>  /**<a name="line.129"></a>
+<span class="sourceLineNo">130</span>   * Requires: vars is given in the form "var1,var2,var3" in ascending alphabetical order with no<a name="line.130"></a>
+<span class="sourceLineNo">131</span>   * spaces &amp;and; invInfo.ppt() != null.<a name="line.131"></a>
+<span class="sourceLineNo">132</span>   *<a name="line.132"></a>
+<span class="sourceLineNo">133</span>   * @return a List of all DiscardInfos di such that &amp;and; the di is for an Invariant from discPpt<a name="line.133"></a>
+<span class="sourceLineNo">134</span>   *     whose class and vars match the params passed into the method call. If the user wishes for<a name="line.134"></a>
+<span class="sourceLineNo">135</span>   *     any of the 3 params to be a wildcard, they can pass that/those param(s) in as null.<a name="line.135"></a>
+<span class="sourceLineNo">136</span>   */<a name="line.136"></a>
+<span class="sourceLineNo">137</span>  public static List&lt;DiscardInfo&gt; returnMatches_from_ppt(InvariantInfo invInfo) {<a name="line.137"></a>
+<span class="sourceLineNo">138</span>    ArrayList&lt;DiscardInfo&gt; result = new ArrayList&lt;&gt;();<a name="line.138"></a>
+<span class="sourceLineNo">139</span>    HashMap&lt;String, List&lt;DiscardInfo&gt;&gt; vars_map_from_ppt = the_map.get(invInfo.ppt());<a name="line.139"></a>
+<span class="sourceLineNo">140</span><a name="line.140"></a>
+<span class="sourceLineNo">141</span>    if (vars_map_from_ppt == null) {<a name="line.141"></a>
+<span class="sourceLineNo">142</span>      return result;<a name="line.142"></a>
+<span class="sourceLineNo">143</span>    }<a name="line.143"></a>
+<span class="sourceLineNo">144</span><a name="line.144"></a>
+<span class="sourceLineNo">145</span>    List&lt;DiscardInfo&gt; di_list = new ArrayList&lt;&gt;();<a name="line.145"></a>
+<span class="sourceLineNo">146</span>    if (invInfo.vars() != null) {<a name="line.146"></a>
+<span class="sourceLineNo">147</span>      // The user entered the vars in a specific order, but let's give<a name="line.147"></a>
+<span class="sourceLineNo">148</span>      // them matching invariants that have those vars in any order.<a name="line.148"></a>
+<span class="sourceLineNo">149</span>      @SuppressWarnings("nullness") // because invInfo.vars() != null<a name="line.149"></a>
+<span class="sourceLineNo">150</span>      @NonNull List&lt;String&gt; var_perms = invInfo.var_permutations();<a name="line.150"></a>
+<span class="sourceLineNo">151</span>      for (String var_perm : var_perms) {<a name="line.151"></a>
+<span class="sourceLineNo">152</span>        List&lt;DiscardInfo&gt; temp = vars_map_from_ppt.get(var_perm);<a name="line.152"></a>
+<span class="sourceLineNo">153</span>        if (temp != null) {<a name="line.153"></a>
+<span class="sourceLineNo">154</span>          di_list.addAll(temp);<a name="line.154"></a>
+<span class="sourceLineNo">155</span>        }<a name="line.155"></a>
+<span class="sourceLineNo">156</span>      }<a name="line.156"></a>
+<span class="sourceLineNo">157</span>    } else {<a name="line.157"></a>
+<span class="sourceLineNo">158</span>      di_list = all_vars_tied_from_ppt(invInfo.ppt());<a name="line.158"></a>
+<span class="sourceLineNo">159</span>    }<a name="line.159"></a>
+<span class="sourceLineNo">160</span><a name="line.160"></a>
+<span class="sourceLineNo">161</span>    for (DiscardInfo di : di_list) {<a name="line.161"></a>
+<span class="sourceLineNo">162</span>      String shortName =<a name="line.162"></a>
+<span class="sourceLineNo">163</span>          di.className()<a name="line.163"></a>
+<span class="sourceLineNo">164</span>              .substring(di.className().lastIndexOf('.') + 1); // chop off hierarchical info<a name="line.164"></a>
+<span class="sourceLineNo">165</span>      if ((invInfo.className() == null)<a name="line.165"></a>
+<span class="sourceLineNo">166</span>          || invInfo.className().equals(di.className())<a name="line.166"></a>
+<span class="sourceLineNo">167</span>          || invInfo.className().equals(shortName)) {<a name="line.167"></a>
+<span class="sourceLineNo">168</span>        result.add(di);<a name="line.168"></a>
+<span class="sourceLineNo">169</span>      }<a name="line.169"></a>
+<span class="sourceLineNo">170</span>    }<a name="line.170"></a>
+<span class="sourceLineNo">171</span>    return result;<a name="line.171"></a>
+<span class="sourceLineNo">172</span>  }<a name="line.172"></a>
+<span class="sourceLineNo">173</span><a name="line.173"></a>
+<span class="sourceLineNo">174</span>  // Helper function used to combine all the DiscardInfo lists associated<a name="line.174"></a>
+<span class="sourceLineNo">175</span>  // with a set of vars at a ppt.  Only called when we know ppt has at<a name="line.175"></a>
+<span class="sourceLineNo">176</span>  // least 1 DiscardInfo associated with it.<a name="line.176"></a>
+<span class="sourceLineNo">177</span>  private static List&lt;DiscardInfo&gt; all_vars_tied_from_ppt(String ppt) {<a name="line.177"></a>
+<span class="sourceLineNo">178</span>    @SuppressWarnings("nullness") // map:  method precondition<a name="line.178"></a>
+<span class="sourceLineNo">179</span>    @NonNull HashMap&lt;String, List&lt;DiscardInfo&gt;&gt; vars_map = the_map.get(ppt);<a name="line.179"></a>
+<span class="sourceLineNo">180</span>    assert vars_map != null;<a name="line.180"></a>
+<span class="sourceLineNo">181</span><a name="line.181"></a>
+<span class="sourceLineNo">182</span>    ArrayList&lt;DiscardInfo&gt; result = new ArrayList&lt;&gt;();<a name="line.182"></a>
+<span class="sourceLineNo">183</span>    for (List&lt;DiscardInfo&gt; ldi : vars_map.values()) {<a name="line.183"></a>
+<span class="sourceLineNo">184</span>      result.addAll(ldi);<a name="line.184"></a>
+<span class="sourceLineNo">185</span>    }<a name="line.185"></a>
+<span class="sourceLineNo">186</span>    return result;<a name="line.186"></a>
+<span class="sourceLineNo">187</span>  }<a name="line.187"></a>
+<span class="sourceLineNo">188</span><a name="line.188"></a>
+<span class="sourceLineNo">189</span>  /** Prints out all vars from ppt that have DiscardInfo's in the Set.toString() format. */<a name="line.189"></a>
+<span class="sourceLineNo">190</span>  public static void debugVarMap(String ppt) {<a name="line.190"></a>
+<span class="sourceLineNo">191</span>    System.out.println();<a name="line.191"></a>
+<span class="sourceLineNo">192</span>    System.out.println();<a name="line.192"></a>
+<span class="sourceLineNo">193</span>    System.out.println("DEBUGGING PPT: " + ppt);<a name="line.193"></a>
+<span class="sourceLineNo">194</span>    HashMap&lt;String, List&lt;DiscardInfo&gt;&gt; vars_map = the_map.get(ppt);<a name="line.194"></a>
+<span class="sourceLineNo">195</span>    if (vars_map == null) {<a name="line.195"></a>
+<span class="sourceLineNo">196</span>      System.out.println("No reasons for this ppt");<a name="line.196"></a>
+<span class="sourceLineNo">197</span>      return;<a name="line.197"></a>
+<span class="sourceLineNo">198</span>    }<a name="line.198"></a>
+<span class="sourceLineNo">199</span>    System.out.println(vars_map.keySet().toString());<a name="line.199"></a>
+<span class="sourceLineNo">200</span>  }<a name="line.200"></a>
+<span class="sourceLineNo">201</span>}<a name="line.201"></a>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</pre>
+</div>
+</body>
+</html>

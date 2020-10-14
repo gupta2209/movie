@@ -1,0 +1,151 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<html lang="en">
+<head><link rel="icon" href="../../daikon-favicon.png" type="image/png"/>
+<title>Source code</title>
+<link rel="stylesheet" type="text/css" href="../../stylesheet.css" title="Style">
+</head>
+<body>
+<div class="sourceContainer">
+<pre><span class="sourceLineNo">001</span>package daikon;<a name="line.1"></a>
+<span class="sourceLineNo">002</span><a name="line.2"></a>
+<span class="sourceLineNo">003</span>import static java.nio.charset.StandardCharsets.UTF_8;<a name="line.3"></a>
+<span class="sourceLineNo">004</span>import static java.nio.file.StandardOpenOption.APPEND;<a name="line.4"></a>
+<span class="sourceLineNo">005</span>import static java.nio.file.StandardOpenOption.CREATE;<a name="line.5"></a>
+<span class="sourceLineNo">006</span><a name="line.6"></a>
+<span class="sourceLineNo">007</span>import java.io.PrintWriter;<a name="line.7"></a>
+<span class="sourceLineNo">008</span>import java.nio.file.Files;<a name="line.8"></a>
+<span class="sourceLineNo">009</span>import java.nio.file.Paths;<a name="line.9"></a>
+<span class="sourceLineNo">010</span>import org.checkerframework.checker.initialization.qual.UnknownInitialization;<a name="line.10"></a>
+<span class="sourceLineNo">011</span><a name="line.11"></a>
+<span class="sourceLineNo">012</span>public class MemMonitor implements Runnable {<a name="line.12"></a>
+<span class="sourceLineNo">013</span><a name="line.13"></a>
+<span class="sourceLineNo">014</span>  PrintWriter fout;<a name="line.14"></a>
+<span class="sourceLineNo">015</span><a name="line.15"></a>
+<span class="sourceLineNo">016</span>  boolean keep_going;<a name="line.16"></a>
+<span class="sourceLineNo">017</span>  long max_mem_usage;<a name="line.17"></a>
+<span class="sourceLineNo">018</span>  String filename;<a name="line.18"></a>
+<span class="sourceLineNo">019</span><a name="line.19"></a>
+<span class="sourceLineNo">020</span>  public MemMonitor(String filename) {<a name="line.20"></a>
+<span class="sourceLineNo">021</span>    this.filename = filename;<a name="line.21"></a>
+<span class="sourceLineNo">022</span>    try {<a name="line.22"></a>
+<span class="sourceLineNo">023</span>      fout = new PrintWriter(Files.newBufferedWriter(Paths.get(filename), UTF_8));<a name="line.23"></a>
+<span class="sourceLineNo">024</span>    } catch (java.io.IOException e) {<a name="line.24"></a>
+<span class="sourceLineNo">025</span>      throw new Error("could not open " + filename, e);<a name="line.25"></a>
+<span class="sourceLineNo">026</span>    }<a name="line.26"></a>
+<span class="sourceLineNo">027</span><a name="line.27"></a>
+<span class="sourceLineNo">028</span>    keep_going = true;<a name="line.28"></a>
+<span class="sourceLineNo">029</span>    max_mem_usage = 0;<a name="line.29"></a>
+<span class="sourceLineNo">030</span><a name="line.30"></a>
+<span class="sourceLineNo">031</span>    long initial_mem_load = mem_usage();<a name="line.31"></a>
+<span class="sourceLineNo">032</span>    fout.println("Initial memory load, " + initial_mem_load);<a name="line.32"></a>
+<span class="sourceLineNo">033</span>    fout.println(<a name="line.33"></a>
+<span class="sourceLineNo">034</span>        "Format: pptName, peak_mem_usage, num_samples, num_static_vars, num_orig_vars, num_scalar_vars, num_array_vars, num_derived_scalar_vars, num_derived_array_vars");<a name="line.34"></a>
+<span class="sourceLineNo">035</span>    fout.close();<a name="line.35"></a>
+<span class="sourceLineNo">036</span>  }<a name="line.36"></a>
+<span class="sourceLineNo">037</span><a name="line.37"></a>
+<span class="sourceLineNo">038</span>  private long mem_usage(@UnknownInitialization(MemMonitor.class) MemMonitor this) {<a name="line.38"></a>
+<span class="sourceLineNo">039</span>    return (java.lang.Runtime.getRuntime().totalMemory()<a name="line.39"></a>
+<span class="sourceLineNo">040</span>        - java.lang.Runtime.getRuntime().freeMemory());<a name="line.40"></a>
+<span class="sourceLineNo">041</span>  }<a name="line.41"></a>
+<span class="sourceLineNo">042</span><a name="line.42"></a>
+<span class="sourceLineNo">043</span>  @Override<a name="line.43"></a>
+<span class="sourceLineNo">044</span>  public void run() {<a name="line.44"></a>
+<span class="sourceLineNo">045</span>    while (keep_going) {<a name="line.45"></a>
+<span class="sourceLineNo">046</span>      max_mem_usage = Math.max(max_mem_usage, mem_usage());<a name="line.46"></a>
+<span class="sourceLineNo">047</span>    }<a name="line.47"></a>
+<span class="sourceLineNo">048</span><a name="line.48"></a>
+<span class="sourceLineNo">049</span>    fout.close();<a name="line.49"></a>
+<span class="sourceLineNo">050</span>  }<a name="line.50"></a>
+<span class="sourceLineNo">051</span><a name="line.51"></a>
+<span class="sourceLineNo">052</span>  public void end_of_iteration(<a name="line.52"></a>
+<span class="sourceLineNo">053</span>      String pptName,<a name="line.53"></a>
+<span class="sourceLineNo">054</span>      int num_samples,<a name="line.54"></a>
+<span class="sourceLineNo">055</span>      int num_static_vars,<a name="line.55"></a>
+<span class="sourceLineNo">056</span>      int num_orig_vars,<a name="line.56"></a>
+<span class="sourceLineNo">057</span>      int num_scalar_vars,<a name="line.57"></a>
+<span class="sourceLineNo">058</span>      int num_array_vars,<a name="line.58"></a>
+<span class="sourceLineNo">059</span>      int num_derived_scalar_vars,<a name="line.59"></a>
+<span class="sourceLineNo">060</span>      int num_derived_array_vars) {<a name="line.60"></a>
+<span class="sourceLineNo">061</span><a name="line.61"></a>
+<span class="sourceLineNo">062</span>    try {<a name="line.62"></a>
+<span class="sourceLineNo">063</span>      fout = new PrintWriter(Files.newBufferedWriter(Paths.get(filename), UTF_8, CREATE, APPEND));<a name="line.63"></a>
+<span class="sourceLineNo">064</span>    } catch (java.io.IOException e) {<a name="line.64"></a>
+<span class="sourceLineNo">065</span>      System.out.println("could not open " + filename);<a name="line.65"></a>
+<span class="sourceLineNo">066</span>    }<a name="line.66"></a>
+<span class="sourceLineNo">067</span><a name="line.67"></a>
+<span class="sourceLineNo">068</span>    fout.print(pptName + ", " + max_mem_usage + ", " + num_samples + ", ");<a name="line.68"></a>
+<span class="sourceLineNo">069</span>    fout.print(num_static_vars + ", " + num_orig_vars + ", " + num_scalar_vars + ", ");<a name="line.69"></a>
+<span class="sourceLineNo">070</span>    fout.println(num_array_vars + ", " + num_derived_scalar_vars + ", " + num_derived_array_vars);<a name="line.70"></a>
+<span class="sourceLineNo">071</span><a name="line.71"></a>
+<span class="sourceLineNo">072</span>    max_mem_usage = mem_usage();<a name="line.72"></a>
+<span class="sourceLineNo">073</span>    fout.close();<a name="line.73"></a>
+<span class="sourceLineNo">074</span>  }<a name="line.74"></a>
+<span class="sourceLineNo">075</span><a name="line.75"></a>
+<span class="sourceLineNo">076</span>  public void stop() {<a name="line.76"></a>
+<span class="sourceLineNo">077</span>    keep_going = false;<a name="line.77"></a>
+<span class="sourceLineNo">078</span>  }<a name="line.78"></a>
+<span class="sourceLineNo">079</span>}<a name="line.79"></a>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</pre>
+</div>
+</body>
+</html>

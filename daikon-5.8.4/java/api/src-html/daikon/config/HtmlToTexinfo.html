@@ -1,0 +1,173 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<html lang="en">
+<head><link rel="icon" href="../../../daikon-favicon.png" type="image/png"/>
+<title>Source code</title>
+<link rel="stylesheet" type="text/css" href="../../../stylesheet.css" title="Style">
+</head>
+<body>
+<div class="sourceContainer">
+<pre><span class="sourceLineNo">001</span>package daikon.config;<a name="line.1"></a>
+<span class="sourceLineNo">002</span><a name="line.2"></a>
+<span class="sourceLineNo">003</span>import java.util.regex.Matcher;<a name="line.3"></a>
+<span class="sourceLineNo">004</span>import java.util.regex.Pattern;<a name="line.4"></a>
+<span class="sourceLineNo">005</span>import org.checkerframework.checker.regex.qual.Regex;<a name="line.5"></a>
+<span class="sourceLineNo">006</span>import org.plumelib.util.UtilPlume;<a name="line.6"></a>
+<span class="sourceLineNo">007</span><a name="line.7"></a>
+<span class="sourceLineNo">008</span>/** Supplies a static method htmlToTexinfo that converts HTML to Texinfo format. */<a name="line.8"></a>
+<span class="sourceLineNo">009</span>public class HtmlToTexinfo {<a name="line.9"></a>
+<span class="sourceLineNo">010</span><a name="line.10"></a>
+<span class="sourceLineNo">011</span>  private static final String lineSep = System.lineSeparator();<a name="line.11"></a>
+<span class="sourceLineNo">012</span><a name="line.12"></a>
+<span class="sourceLineNo">013</span>  public static @Regex(1) Pattern javadocAtCode;<a name="line.13"></a>
+<span class="sourceLineNo">014</span><a name="line.14"></a>
+<span class="sourceLineNo">015</span>  static {<a name="line.15"></a>
+<span class="sourceLineNo">016</span>    // Javadoc actually permits matched braces.  Expand this in the future when needed.<a name="line.16"></a>
+<span class="sourceLineNo">017</span>    // javadocAtCode = Pattern.compile("\\{@code ([^{}]*?)\\}");<a name="line.17"></a>
+<span class="sourceLineNo">018</span>    javadocAtCode = Pattern.compile("\\{@code[ \n]+([^{}]*?(\\{[^{}]*?\\}[^{}]*?)?)\\}");<a name="line.18"></a>
+<span class="sourceLineNo">019</span>  }<a name="line.19"></a>
+<span class="sourceLineNo">020</span><a name="line.20"></a>
+<span class="sourceLineNo">021</span>  /**<a name="line.21"></a>
+<span class="sourceLineNo">022</span>   * Converts Javadoc-flavored HTML to Texinfo.<a name="line.22"></a>
+<span class="sourceLineNo">023</span>   *<a name="line.23"></a>
+<span class="sourceLineNo">024</span>   * &lt;p&gt;In particular, handles extra tags that may occur in Javadoc code.<a name="line.24"></a>
+<span class="sourceLineNo">025</span>   */<a name="line.25"></a>
+<span class="sourceLineNo">026</span>  public static String javadocHtmlToTexinfo(String s) {<a name="line.26"></a>
+<span class="sourceLineNo">027</span><a name="line.27"></a>
+<span class="sourceLineNo">028</span>    StringBuilder result = new StringBuilder();<a name="line.28"></a>
+<span class="sourceLineNo">029</span>    int pos = 0;<a name="line.29"></a>
+<span class="sourceLineNo">030</span>    Matcher m = javadocAtCode.matcher(s);<a name="line.30"></a>
+<span class="sourceLineNo">031</span>    while (m.find(pos)) {<a name="line.31"></a>
+<span class="sourceLineNo">032</span>      result.append(htmlToTexinfo(s.substring(pos, m.start())));<a name="line.32"></a>
+<span class="sourceLineNo">033</span>      result.append("@code{");<a name="line.33"></a>
+<span class="sourceLineNo">034</span>      String codeText = s.substring(m.start(1), m.end(1));<a name="line.34"></a>
+<span class="sourceLineNo">035</span>      String codeTextQuoted = codeText.replace("{", "@{").replace("}", "@}");<a name="line.35"></a>
+<span class="sourceLineNo">036</span>      result.append(codeTextQuoted);<a name="line.36"></a>
+<span class="sourceLineNo">037</span>      result.append("}");<a name="line.37"></a>
+<span class="sourceLineNo">038</span>      pos = m.end();<a name="line.38"></a>
+<span class="sourceLineNo">039</span>    }<a name="line.39"></a>
+<span class="sourceLineNo">040</span>    result.append(htmlToTexinfo(s.substring(pos, s.length())));<a name="line.40"></a>
+<span class="sourceLineNo">041</span>    return result.toString();<a name="line.41"></a>
+<span class="sourceLineNo">042</span>  }<a name="line.42"></a>
+<span class="sourceLineNo">043</span><a name="line.43"></a>
+<span class="sourceLineNo">044</span>  /** Converts HTML to Texinfo. */<a name="line.44"></a>
+<span class="sourceLineNo">045</span>  public static String htmlToTexinfo(String s) {<a name="line.45"></a>
+<span class="sourceLineNo">046</span><a name="line.46"></a>
+<span class="sourceLineNo">047</span>    // Remove leading spaces, which throw off Info.<a name="line.47"></a>
+<span class="sourceLineNo">048</span>    s = UtilPlume.replaceString(s, lineSep + " ", lineSep);<a name="line.48"></a>
+<span class="sourceLineNo">049</span><a name="line.49"></a>
+<span class="sourceLineNo">050</span>    s = UtilPlume.replaceString(s, "{", "@{");<a name="line.50"></a>
+<span class="sourceLineNo">051</span>    s = UtilPlume.replaceString(s, "}", "@}");<a name="line.51"></a>
+<span class="sourceLineNo">052</span>    s = s.replaceAll("(@p?x?ref)@\\{(.*)@\\}", "$1{$2}");<a name="line.52"></a>
+<span class="sourceLineNo">053</span>    s = UtilPlume.replaceString(s, "&lt;br&gt;", "@*");<a name="line.53"></a>
+<span class="sourceLineNo">054</span>    s = UtilPlume.replaceString(s, lineSep + lineSep + "&lt;p&gt;", lineSep + lineSep);<a name="line.54"></a>
+<span class="sourceLineNo">055</span>    s = UtilPlume.replaceString(s, "&lt;p&gt;", "@*@*");<a name="line.55"></a>
+<span class="sourceLineNo">056</span>    // Sadly, Javadoc prohibits the &lt;samp&gt; tag.  Use &lt;code&gt; instead.<a name="line.56"></a>
+<span class="sourceLineNo">057</span>    s = UtilPlume.replaceString(s, "&lt;samp&gt;", "@samp{");<a name="line.57"></a>
+<span class="sourceLineNo">058</span>    s = UtilPlume.replaceString(s, "&lt;/samp&gt;", "}");<a name="line.58"></a>
+<span class="sourceLineNo">059</span>    s = UtilPlume.replaceString(s, "&lt;code&gt;", "@code{");<a name="line.59"></a>
+<span class="sourceLineNo">060</span>    s = UtilPlume.replaceString(s, "&lt;/code&gt;", "}");<a name="line.60"></a>
+<span class="sourceLineNo">061</span>    s = UtilPlume.replaceString(s, lineSep + "&lt;pre&gt;" + lineSep, lineSep + "@example" + lineSep);<a name="line.61"></a>
+<span class="sourceLineNo">062</span>    s = UtilPlume.replaceString(s, "&lt;pre&gt;" + lineSep, lineSep + "@example" + lineSep);<a name="line.62"></a>
+<span class="sourceLineNo">063</span>    s = UtilPlume.replaceString(s, lineSep + "&lt;pre&gt;", lineSep + "@example" + lineSep);<a name="line.63"></a>
+<span class="sourceLineNo">064</span>    s = UtilPlume.replaceString(s, "&lt;pre&gt;", lineSep + "@example" + lineSep);<a name="line.64"></a>
+<span class="sourceLineNo">065</span>    s =<a name="line.65"></a>
+<span class="sourceLineNo">066</span>        UtilPlume.replaceString(<a name="line.66"></a>
+<span class="sourceLineNo">067</span>            s, lineSep + "&lt;/pre&gt;" + lineSep, lineSep + "@end example" + lineSep);<a name="line.67"></a>
+<span class="sourceLineNo">068</span>    s = UtilPlume.replaceString(s, "&lt;/pre&gt;" + lineSep, lineSep + "@end example" + lineSep);<a name="line.68"></a>
+<span class="sourceLineNo">069</span>    s = UtilPlume.replaceString(s, lineSep + "&lt;/pre&gt;", lineSep + "@end example" + lineSep);<a name="line.69"></a>
+<span class="sourceLineNo">070</span>    s = UtilPlume.replaceString(s, "&lt;/pre&gt;", lineSep + "@end example" + lineSep);<a name="line.70"></a>
+<span class="sourceLineNo">071</span>    // Catch-all for parameters, filenames, etc. for which there is no specific HTML formatting.<a name="line.71"></a>
+<span class="sourceLineNo">072</span>    // But Javadoc should use &lt;code&gt;...&lt;/code&gt; rather than &lt;tt&gt;.<a name="line.72"></a>
+<span class="sourceLineNo">073</span>    s = UtilPlume.replaceString(s, "&lt;tt&gt;", "@code{");<a name="line.73"></a>
+<span class="sourceLineNo">074</span>    s = UtilPlume.replaceString(s, "&lt;/tt&gt;", "}");<a name="line.74"></a>
+<span class="sourceLineNo">075</span><a name="line.75"></a>
+<span class="sourceLineNo">076</span>    // Other HTML formatting to handle in the future<a name="line.76"></a>
+<span class="sourceLineNo">077</span>    // BLOCKQUOTE, "\n\n",        ""<a name="line.77"></a>
+<span class="sourceLineNo">078</span>    // LI,         "\n@item ",    ""<a name="line.78"></a>
+<span class="sourceLineNo">079</span>    // UL,         "\n\n@itemize @bullet\n", "\n@end itemize\n"<a name="line.79"></a>
+<span class="sourceLineNo">080</span>    // OL,         "\n\n@itemize @bullet\n", "\n@end itemize\n"<a name="line.80"></a>
+<span class="sourceLineNo">081</span>    // MENU,       "\n\n@itemize @bullet\n", "\n@end itemize\n"<a name="line.81"></a>
+<span class="sourceLineNo">082</span>    // DIR,        "\n\n@itemize @bullet\n", "\n@end itemize\n"<a name="line.82"></a>
+<span class="sourceLineNo">083</span>    // H1,         "\n\n@section ",  "\n"<a name="line.83"></a>
+<span class="sourceLineNo">084</span>    // H2,         "\n\n@section ",  "\n"<a name="line.84"></a>
+<span class="sourceLineNo">085</span>    // H3,         "\n\n@section ",  "\n"<a name="line.85"></a>
+<span class="sourceLineNo">086</span>    // H4,         "\n\n@section ",  "\n"<a name="line.86"></a>
+<span class="sourceLineNo">087</span>    // A,          "", ""<a name="line.87"></a>
+<span class="sourceLineNo">088</span>    // SUP,        "^", ""<a name="line.88"></a>
+<span class="sourceLineNo">089</span><a name="line.89"></a>
+<span class="sourceLineNo">090</span>    s = UtilPlume.replaceString(s, "&amp;gt;", "&gt;");<a name="line.90"></a>
+<span class="sourceLineNo">091</span>    s = UtilPlume.replaceString(s, "&amp;ge;", "&gt;=");<a name="line.91"></a>
+<span class="sourceLineNo">092</span>    s = UtilPlume.replaceString(s, "&amp;lt;", "&lt;");<a name="line.92"></a>
+<span class="sourceLineNo">093</span>    s = UtilPlume.replaceString(s, "&amp;le;", "&lt;=");<a name="line.93"></a>
+<span class="sourceLineNo">094</span>    s = UtilPlume.replaceString(s, "&amp;rArr;", "-&gt;");<a name="line.94"></a>
+<span class="sourceLineNo">095</span><a name="line.95"></a>
+<span class="sourceLineNo">096</span>    // &amp;amp must come last<a name="line.96"></a>
+<span class="sourceLineNo">097</span>    s = UtilPlume.replaceString(s, "&amp;amp;", "&amp;");<a name="line.97"></a>
+<span class="sourceLineNo">098</span><a name="line.98"></a>
+<span class="sourceLineNo">099</span>    return s;<a name="line.99"></a>
+<span class="sourceLineNo">100</span>  }<a name="line.100"></a>
+<span class="sourceLineNo">101</span>}<a name="line.101"></a>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</pre>
+</div>
+</body>
+</html>

@@ -1,0 +1,156 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<html lang="en">
+<head><link rel="icon" href="../../../../daikon-favicon.png" type="image/png"/>
+<title>Source code</title>
+<link rel="stylesheet" type="text/css" href="../../../../stylesheet.css" title="Style">
+</head>
+<body>
+<div class="sourceContainer">
+<pre><span class="sourceLineNo">001</span>package daikon.test.diff;<a name="line.1"></a>
+<span class="sourceLineNo">002</span><a name="line.2"></a>
+<span class="sourceLineNo">003</span>import static org.junit.Assert.assertEquals;<a name="line.3"></a>
+<span class="sourceLineNo">004</span><a name="line.4"></a>
+<span class="sourceLineNo">005</span>import daikon.*;<a name="line.5"></a>
+<span class="sourceLineNo">006</span>import daikon.diff.*;<a name="line.6"></a>
+<span class="sourceLineNo">007</span>import daikon.inv.*;<a name="line.7"></a>
+<span class="sourceLineNo">008</span>import daikon.test.*;<a name="line.8"></a>
+<span class="sourceLineNo">009</span>import java.util.Arrays;<a name="line.9"></a>
+<span class="sourceLineNo">010</span>import junit.framework.*;<a name="line.10"></a>
+<span class="sourceLineNo">011</span>import org.junit.BeforeClass;<a name="line.11"></a>
+<span class="sourceLineNo">012</span>import org.junit.Test;<a name="line.12"></a>
+<span class="sourceLineNo">013</span><a name="line.13"></a>
+<span class="sourceLineNo">014</span>public class XorVisitorTester {<a name="line.14"></a>
+<span class="sourceLineNo">015</span><a name="line.15"></a>
+<span class="sourceLineNo">016</span>  private Diff diff = new Diff(true, new Invariant.ClassVarnameFormulaComparator());<a name="line.16"></a>
+<span class="sourceLineNo">017</span><a name="line.17"></a>
+<span class="sourceLineNo">018</span>  @BeforeClass<a name="line.18"></a>
+<span class="sourceLineNo">019</span>  public static void setUpClass() {<a name="line.19"></a>
+<span class="sourceLineNo">020</span>    daikon.LogHelper.setupLogs(LogHelper.INFO);<a name="line.20"></a>
+<span class="sourceLineNo">021</span>    FileIO.new_decl_format = true;<a name="line.21"></a>
+<span class="sourceLineNo">022</span>  }<a name="line.22"></a>
+<span class="sourceLineNo">023</span><a name="line.23"></a>
+<span class="sourceLineNo">024</span>  // X1 and X2 have the same class and vars, but different formula<a name="line.24"></a>
+<span class="sourceLineNo">025</span>  // map1: A-&gt;{W, X1, Y}, B-&gt;{Y}, D-&gt;{M, N_unjusitifed, O_unjustified}<a name="line.25"></a>
+<span class="sourceLineNo">026</span>  // map2: A-&gt;{W, X2, Z}, C-&gt;{Z}, D-&gt;{M_unjustified, N}<a name="line.26"></a>
+<span class="sourceLineNo">027</span>  // map1 xor map2: A-&gt;{X1, X2, Y, Z}, B-&gt;{Y}, C-&gt;{Z}, D-&gt;{M, N}<a name="line.27"></a>
+<span class="sourceLineNo">028</span>  @Test<a name="line.28"></a>
+<span class="sourceLineNo">029</span>  public void testXor() {<a name="line.29"></a>
+<span class="sourceLineNo">030</span>    VarInfo[] vars = {<a name="line.30"></a>
+<span class="sourceLineNo">031</span>      DiffTester.newIntVarInfo("w"),<a name="line.31"></a>
+<span class="sourceLineNo">032</span>      DiffTester.newIntVarInfo("x"),<a name="line.32"></a>
+<span class="sourceLineNo">033</span>      DiffTester.newIntVarInfo("y"),<a name="line.33"></a>
+<span class="sourceLineNo">034</span>      DiffTester.newIntVarInfo("z"),<a name="line.34"></a>
+<span class="sourceLineNo">035</span>      DiffTester.newIntVarInfo("m"),<a name="line.35"></a>
+<span class="sourceLineNo">036</span>      DiffTester.newIntVarInfo("n"),<a name="line.36"></a>
+<span class="sourceLineNo">037</span>      DiffTester.newIntVarInfo("o"),<a name="line.37"></a>
+<span class="sourceLineNo">038</span>    };<a name="line.38"></a>
+<span class="sourceLineNo">039</span>    PptTopLevel A = Common.makePptTopLevel("A:::OBJECT", vars);<a name="line.39"></a>
+<span class="sourceLineNo">040</span>    PptTopLevel B = Common.makePptTopLevel("B:::OBJECT", vars);<a name="line.40"></a>
+<span class="sourceLineNo">041</span>    PptTopLevel C = Common.makePptTopLevel("C:::OBJECT", vars);<a name="line.41"></a>
+<span class="sourceLineNo">042</span>    PptTopLevel D = Common.makePptTopLevel("D:::OBJECT", vars);<a name="line.42"></a>
+<span class="sourceLineNo">043</span>    PptSlice slicew = new PptSlice1(A, new VarInfo[] {vars[0]});<a name="line.43"></a>
+<span class="sourceLineNo">044</span>    PptSlice slicex = new PptSlice1(A, new VarInfo[] {vars[1]});<a name="line.44"></a>
+<span class="sourceLineNo">045</span>    PptSlice slicey = new PptSlice1(A, new VarInfo[] {vars[2]});<a name="line.45"></a>
+<span class="sourceLineNo">046</span>    PptSlice slicez = new PptSlice1(A, new VarInfo[] {vars[3]});<a name="line.46"></a>
+<span class="sourceLineNo">047</span>    PptSlice slicem = new PptSlice1(A, new VarInfo[] {vars[4]});<a name="line.47"></a>
+<span class="sourceLineNo">048</span>    PptSlice slicen = new PptSlice1(A, new VarInfo[] {vars[5]});<a name="line.48"></a>
+<span class="sourceLineNo">049</span>    PptSlice sliceo = new PptSlice1(A, new VarInfo[] {vars[6]});<a name="line.49"></a>
+<span class="sourceLineNo">050</span>    Invariant W = new DiffDummyInvariant(slicew, "W", true);<a name="line.50"></a>
+<span class="sourceLineNo">051</span>    Invariant X1 = new DiffDummyInvariant(slicex, "X1", true);<a name="line.51"></a>
+<span class="sourceLineNo">052</span>    Invariant X2 = new DiffDummyInvariant(slicex, "X2", true);<a name="line.52"></a>
+<span class="sourceLineNo">053</span>    Invariant Y = new DiffDummyInvariant(slicey, "Y", true);<a name="line.53"></a>
+<span class="sourceLineNo">054</span>    Invariant Z = new DiffDummyInvariant(slicez, "Z", true);<a name="line.54"></a>
+<span class="sourceLineNo">055</span>    Invariant M = new DiffDummyInvariant(slicem, "M", true);<a name="line.55"></a>
+<span class="sourceLineNo">056</span>    Invariant unjM = new DiffDummyInvariant(slicem, "M", false);<a name="line.56"></a>
+<span class="sourceLineNo">057</span>    Invariant N = new DiffDummyInvariant(slicen, "N", true);<a name="line.57"></a>
+<span class="sourceLineNo">058</span>    Invariant unjN = new DiffDummyInvariant(slicen, "N", false);<a name="line.58"></a>
+<span class="sourceLineNo">059</span>    Invariant unjO = new DiffDummyInvariant(sliceo, "O", false);<a name="line.59"></a>
+<span class="sourceLineNo">060</span><a name="line.60"></a>
+<span class="sourceLineNo">061</span>    InvMap map1 = new InvMap();<a name="line.61"></a>
+<span class="sourceLineNo">062</span>    map1.put(A, Arrays.asList(W, X1, Y));<a name="line.62"></a>
+<span class="sourceLineNo">063</span>    map1.put(B, Arrays.asList(Y));<a name="line.63"></a>
+<span class="sourceLineNo">064</span>    map1.put(D, Arrays.asList(M, unjN, unjO));<a name="line.64"></a>
+<span class="sourceLineNo">065</span><a name="line.65"></a>
+<span class="sourceLineNo">066</span>    InvMap map2 = new InvMap();<a name="line.66"></a>
+<span class="sourceLineNo">067</span>    map2.put(A, Arrays.asList(W, X2, Z));<a name="line.67"></a>
+<span class="sourceLineNo">068</span>    map2.put(C, Arrays.asList(Z));<a name="line.68"></a>
+<span class="sourceLineNo">069</span>    map2.put(D, Arrays.asList(unjM, N));<a name="line.69"></a>
+<span class="sourceLineNo">070</span><a name="line.70"></a>
+<span class="sourceLineNo">071</span>    RootNode root = diff.diffInvMap(map1, map2, false);<a name="line.71"></a>
+<span class="sourceLineNo">072</span>    XorVisitor v = new XorVisitor();<a name="line.72"></a>
+<span class="sourceLineNo">073</span>    root.accept(v);<a name="line.73"></a>
+<span class="sourceLineNo">074</span>    InvMap result = v.getResult();<a name="line.74"></a>
+<span class="sourceLineNo">075</span><a name="line.75"></a>
+<span class="sourceLineNo">076</span>    InvMap expected = new InvMap();<a name="line.76"></a>
+<span class="sourceLineNo">077</span>    expected.put(A, Arrays.asList(X1, X2, Y, Z));<a name="line.77"></a>
+<span class="sourceLineNo">078</span>    expected.put(B, Arrays.asList(Y));<a name="line.78"></a>
+<span class="sourceLineNo">079</span>    expected.put(C, Arrays.asList(Z));<a name="line.79"></a>
+<span class="sourceLineNo">080</span>    expected.put(D, Arrays.asList(M, N));<a name="line.80"></a>
+<span class="sourceLineNo">081</span><a name="line.81"></a>
+<span class="sourceLineNo">082</span>    assertEquals(expected.toString(), result.toString());<a name="line.82"></a>
+<span class="sourceLineNo">083</span>  }<a name="line.83"></a>
+<span class="sourceLineNo">084</span>}<a name="line.84"></a>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</pre>
+</div>
+</body>
+</html>

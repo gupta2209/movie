@@ -1,0 +1,11 @@
+libiberty/fjalar_amd64_linux-dwarfnames.o: libiberty/dwarfnames.c \
+ /usr/include/stdc-predef.h include/dwarf2.h include/dwarf2.def \
+ include/dwarf2.def
+
+/usr/include/stdc-predef.h:
+
+include/dwarf2.h:
+
+include/dwarf2.def:
+
+include/dwarf2.def:

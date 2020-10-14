@@ -1,0 +1,193 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<html lang="en">
+<head><link rel="icon" href="../../daikon-favicon.png" type="image/png"/>
+<title>Source code</title>
+<link rel="stylesheet" type="text/css" href="../../stylesheet.css" title="Style">
+</head>
+<body>
+<div class="sourceContainer">
+<pre><span class="sourceLineNo">001</span>package daikon;<a name="line.1"></a>
+<span class="sourceLineNo">002</span><a name="line.2"></a>
+<span class="sourceLineNo">003</span>import java.util.logging.Logger;<a name="line.3"></a>
+<span class="sourceLineNo">004</span>import org.checkerframework.checker.lock.qual.GuardSatisfied;<a name="line.4"></a>
+<span class="sourceLineNo">005</span>import org.checkerframework.dataflow.qual.Pure;<a name="line.5"></a>
+<span class="sourceLineNo">006</span><a name="line.6"></a>
+<span class="sourceLineNo">007</span>// Internally, we use the names "array[]", "array[]-element", and<a name="line.7"></a>
+<span class="sourceLineNo">008</span>// "array[]-indexn".  These may be different depending on the programming<a name="line.8"></a>
+<span class="sourceLineNo">009</span>// language; for instance, C uses "*array" in place of "array[]-element".<a name="line.9"></a>
+<span class="sourceLineNo">010</span><a name="line.10"></a>
+<span class="sourceLineNo">011</span>/**<a name="line.11"></a>
+<span class="sourceLineNo">012</span> * Represents the comparability of variables, including methods to determine if two<a name="line.12"></a>
+<span class="sourceLineNo">013</span> * VarComparabilities are comparable. VarComparability types have two formats: implicit and none.<a name="line.13"></a>
+<span class="sourceLineNo">014</span> *<a name="line.14"></a>
+<span class="sourceLineNo">015</span> * &lt;p&gt;A VarComparabilityImplicit is an arbitrary string, and comparisons succeed exactly if the two<a name="line.15"></a>
+<span class="sourceLineNo">016</span> * VarComparabilitys are identical.<a name="line.16"></a>
+<span class="sourceLineNo">017</span> *<a name="line.17"></a>
+<span class="sourceLineNo">018</span> * &lt;p&gt;VarComparabilityNone means no comparability information was provided.<a name="line.18"></a>
+<span class="sourceLineNo">019</span> */<a name="line.19"></a>
+<span class="sourceLineNo">020</span>public abstract class VarComparability {<a name="line.20"></a>
+<span class="sourceLineNo">021</span><a name="line.21"></a>
+<span class="sourceLineNo">022</span>  /** Debug tracer. */<a name="line.22"></a>
+<span class="sourceLineNo">023</span>  public static final Logger debug = Logger.getLogger("daikon.VarComparability");<a name="line.23"></a>
+<span class="sourceLineNo">024</span><a name="line.24"></a>
+<span class="sourceLineNo">025</span>  public static final int NONE = 0;<a name="line.25"></a>
+<span class="sourceLineNo">026</span>  public static final int IMPLICIT = 1;<a name="line.26"></a>
+<span class="sourceLineNo">027</span><a name="line.27"></a>
+<span class="sourceLineNo">028</span>  /**<a name="line.28"></a>
+<span class="sourceLineNo">029</span>   * Create a VarComparability representing the given arguments with respect to a variable.<a name="line.29"></a>
+<span class="sourceLineNo">030</span>   *<a name="line.30"></a>
+<span class="sourceLineNo">031</span>   * @param format the type of comparability, either NONE or IMPLICIT<a name="line.31"></a>
+<span class="sourceLineNo">032</span>   * @param rep a regular expression indicating how to match. The form is "(a)[b][c]..." where each<a name="line.32"></a>
+<span class="sourceLineNo">033</span>   *     variable is string (or number) that is a UID for a basic type. a is the type of the<a name="line.33"></a>
+<span class="sourceLineNo">034</span>   *     element, b is the type of the first index, c the type of the second, etc. Index variables<a name="line.34"></a>
+<span class="sourceLineNo">035</span>   *     only apply if this is an array.<a name="line.35"></a>
+<span class="sourceLineNo">036</span>   * @param vartype the declared type of the variable<a name="line.36"></a>
+<span class="sourceLineNo">037</span>   */<a name="line.37"></a>
+<span class="sourceLineNo">038</span>  public static VarComparability parse(int format, String rep, ProglangType vartype) {<a name="line.38"></a>
+<span class="sourceLineNo">039</span>    if (format == NONE) {<a name="line.39"></a>
+<span class="sourceLineNo">040</span>      return VarComparabilityNone.parse(rep, vartype);<a name="line.40"></a>
+<span class="sourceLineNo">041</span>    } else if (format == IMPLICIT) {<a name="line.41"></a>
+<span class="sourceLineNo">042</span>      return VarComparabilityImplicit.parse(rep, vartype);<a name="line.42"></a>
+<span class="sourceLineNo">043</span>    } else {<a name="line.43"></a>
+<span class="sourceLineNo">044</span>      throw new IllegalArgumentException(<a name="line.44"></a>
+<span class="sourceLineNo">045</span>          "bad format argument " + format + " should have been in {0, 1, 2}");<a name="line.45"></a>
+<span class="sourceLineNo">046</span>    }<a name="line.46"></a>
+<span class="sourceLineNo">047</span>  }<a name="line.47"></a>
+<span class="sourceLineNo">048</span><a name="line.48"></a>
+<span class="sourceLineNo">049</span>  /**<a name="line.49"></a>
+<span class="sourceLineNo">050</span>   * Create a VarComparability based on comparabilities of indices.<a name="line.50"></a>
+<span class="sourceLineNo">051</span>   *<a name="line.51"></a>
+<span class="sourceLineNo">052</span>   * @return a new comparability that is an array with the same dimensionality and indices as given,<a name="line.52"></a>
+<span class="sourceLineNo">053</span>   *     but with a different element type<a name="line.53"></a>
+<span class="sourceLineNo">054</span>   * @param elemTypeName the new type of the elements of return value<a name="line.54"></a>
+<span class="sourceLineNo">055</span>   * @param old the varcomparability that this is derived from; has the same indices as this<a name="line.55"></a>
+<span class="sourceLineNo">056</span>   */<a name="line.56"></a>
+<span class="sourceLineNo">057</span>  public static VarComparability makeComparabilitySameIndices(<a name="line.57"></a>
+<span class="sourceLineNo">058</span>      String elemTypeName, VarComparability old) {<a name="line.58"></a>
+<span class="sourceLineNo">059</span>    if (old instanceof VarComparabilityNone) {<a name="line.59"></a>
+<span class="sourceLineNo">060</span>      return VarComparabilityNone.it;<a name="line.60"></a>
+<span class="sourceLineNo">061</span>    } else {<a name="line.61"></a>
+<span class="sourceLineNo">062</span>      throw new Error("makeComparabilitySameIndices not implemented for implicit comparables");<a name="line.62"></a>
+<span class="sourceLineNo">063</span>    }<a name="line.63"></a>
+<span class="sourceLineNo">064</span>  }<a name="line.64"></a>
+<span class="sourceLineNo">065</span><a name="line.65"></a>
+<span class="sourceLineNo">066</span>  public static VarComparability makeAlias(VarInfo vi) {<a name="line.66"></a>
+<span class="sourceLineNo">067</span>    return vi.comparability.makeAlias();<a name="line.67"></a>
+<span class="sourceLineNo">068</span>  }<a name="line.68"></a>
+<span class="sourceLineNo">069</span><a name="line.69"></a>
+<span class="sourceLineNo">070</span>  public abstract VarComparability makeAlias();<a name="line.70"></a>
+<span class="sourceLineNo">071</span><a name="line.71"></a>
+<span class="sourceLineNo">072</span>  public abstract VarComparability elementType(@GuardSatisfied VarComparability this);<a name="line.72"></a>
+<span class="sourceLineNo">073</span><a name="line.73"></a>
+<span class="sourceLineNo">074</span>  public abstract VarComparability indexType(@GuardSatisfied VarComparability this, int dim);<a name="line.74"></a>
+<span class="sourceLineNo">075</span><a name="line.75"></a>
+<span class="sourceLineNo">076</span>  /** Return the comparability for the length of this string* */<a name="line.76"></a>
+<span class="sourceLineNo">077</span>  public abstract VarComparability string_length_type();<a name="line.77"></a>
+<span class="sourceLineNo">078</span><a name="line.78"></a>
+<span class="sourceLineNo">079</span>  /** Returns true if this is comparable to everything else. */<a name="line.79"></a>
+<span class="sourceLineNo">080</span>  public abstract boolean alwaysComparable(@GuardSatisfied VarComparability this);<a name="line.80"></a>
+<span class="sourceLineNo">081</span><a name="line.81"></a>
+<span class="sourceLineNo">082</span>  /** Returns whether two variables are comparable. */<a name="line.82"></a>
+<span class="sourceLineNo">083</span>  @Pure<a name="line.83"></a>
+<span class="sourceLineNo">084</span>  public static boolean comparable(VarInfo v1, VarInfo v2) {<a name="line.84"></a>
+<span class="sourceLineNo">085</span>    return comparable(v1.comparability, v2.comparability);<a name="line.85"></a>
+<span class="sourceLineNo">086</span>  }<a name="line.86"></a>
+<span class="sourceLineNo">087</span><a name="line.87"></a>
+<span class="sourceLineNo">088</span>  /** Returns whether two comparabilities are comparable. */<a name="line.88"></a>
+<span class="sourceLineNo">089</span>  @SuppressWarnings("all:purity") // Override the purity checker<a name="line.89"></a>
+<span class="sourceLineNo">090</span>  @Pure<a name="line.90"></a>
+<span class="sourceLineNo">091</span>  public static boolean comparable(<a name="line.91"></a>
+<span class="sourceLineNo">092</span>      @GuardSatisfied VarComparability type1, @GuardSatisfied VarComparability type2) {<a name="line.92"></a>
+<span class="sourceLineNo">093</span><a name="line.93"></a>
+<span class="sourceLineNo">094</span>    if (type1 != null &amp;&amp; type2 != null &amp;&amp; type1.getClass() != type2.getClass()) {<a name="line.94"></a>
+<span class="sourceLineNo">095</span>      throw new Error(<a name="line.95"></a>
+<span class="sourceLineNo">096</span>          String.format(<a name="line.96"></a>
+<span class="sourceLineNo">097</span>              "Trying to compare VarComparabilities of different types: %s (%s) and %s (%s)",<a name="line.97"></a>
+<span class="sourceLineNo">098</span>              type1.toString(), type1.getClass(), type2.toString(), type2.getClass()));<a name="line.98"></a>
+<span class="sourceLineNo">099</span>    }<a name="line.99"></a>
+<span class="sourceLineNo">100</span><a name="line.100"></a>
+<span class="sourceLineNo">101</span>    if (type1 instanceof VarComparabilityNone || type1 == null || type2 == null) {<a name="line.101"></a>
+<span class="sourceLineNo">102</span>      return VarComparabilityNone.comparable(<a name="line.102"></a>
+<span class="sourceLineNo">103</span>          (VarComparabilityNone) type1, (VarComparabilityNone) type2);<a name="line.103"></a>
+<span class="sourceLineNo">104</span>    } else if (type1 instanceof VarComparabilityImplicit) {<a name="line.104"></a>
+<span class="sourceLineNo">105</span>      return VarComparabilityImplicit.comparable(<a name="line.105"></a>
+<span class="sourceLineNo">106</span>          (VarComparabilityImplicit) type1, (VarComparabilityImplicit) type2);<a name="line.106"></a>
+<span class="sourceLineNo">107</span>    } else {<a name="line.107"></a>
+<span class="sourceLineNo">108</span>      throw new Error("Unrecognized subtype of VarComparability: " + type1);<a name="line.108"></a>
+<span class="sourceLineNo">109</span>    }<a name="line.109"></a>
+<span class="sourceLineNo">110</span>  }<a name="line.110"></a>
+<span class="sourceLineNo">111</span><a name="line.111"></a>
+<span class="sourceLineNo">112</span>  /**<a name="line.112"></a>
+<span class="sourceLineNo">113</span>   * In general, if two items are comparable, they can be placed in the same equality set. This is<a name="line.113"></a>
+<span class="sourceLineNo">114</span>   * not always true for some comparabilities (because they are not always transitive). They can<a name="line.114"></a>
+<span class="sourceLineNo">115</span>   * override this method to provide the correct results.<a name="line.115"></a>
+<span class="sourceLineNo">116</span>   */<a name="line.116"></a>
+<span class="sourceLineNo">117</span>  public boolean equality_set_ok(<a name="line.117"></a>
+<span class="sourceLineNo">118</span>      @GuardSatisfied VarComparability this, @GuardSatisfied VarComparability other) {<a name="line.118"></a>
+<span class="sourceLineNo">119</span>    return comparable(this, other);<a name="line.119"></a>
+<span class="sourceLineNo">120</span>  }<a name="line.120"></a>
+<span class="sourceLineNo">121</span>}<a name="line.121"></a>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</pre>
+</div>
+</body>
+</html>

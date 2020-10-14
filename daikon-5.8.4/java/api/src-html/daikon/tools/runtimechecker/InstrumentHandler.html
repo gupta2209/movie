@@ -1,0 +1,348 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<html lang="en">
+<head><link rel="icon" href="../../../../daikon-favicon.png" type="image/png"/>
+<title>Source code</title>
+<link rel="stylesheet" type="text/css" href="../../../../stylesheet.css" title="Style">
+</head>
+<body>
+<div class="sourceContainer">
+<pre><span class="sourceLineNo">001</span>package daikon.tools.runtimechecker;<a name="line.1"></a>
+<span class="sourceLineNo">002</span><a name="line.2"></a>
+<span class="sourceLineNo">003</span>import static java.nio.charset.StandardCharsets.UTF_8;<a name="line.3"></a>
+<span class="sourceLineNo">004</span><a name="line.4"></a>
+<span class="sourceLineNo">005</span>import daikon.Daikon;<a name="line.5"></a>
+<span class="sourceLineNo">006</span>import daikon.FileIO;<a name="line.6"></a>
+<span class="sourceLineNo">007</span>import daikon.Global;<a name="line.7"></a>
+<span class="sourceLineNo">008</span>import daikon.LogHelper;<a name="line.8"></a>
+<span class="sourceLineNo">009</span>import daikon.PptMap;<a name="line.9"></a>
+<span class="sourceLineNo">010</span>import daikon.tools.jtb.ParseResults;<a name="line.10"></a>
+<span class="sourceLineNo">011</span>import gnu.getopt.Getopt;<a name="line.11"></a>
+<span class="sourceLineNo">012</span>import gnu.getopt.LongOpt;<a name="line.12"></a>
+<span class="sourceLineNo">013</span>import java.io.File;<a name="line.13"></a>
+<span class="sourceLineNo">014</span>import java.io.IOException;<a name="line.14"></a>
+<span class="sourceLineNo">015</span>import java.io.Writer;<a name="line.15"></a>
+<span class="sourceLineNo">016</span>import java.nio.file.Files;<a name="line.16"></a>
+<span class="sourceLineNo">017</span>import java.util.ArrayList;<a name="line.17"></a>
+<span class="sourceLineNo">018</span>import java.util.List;<a name="line.18"></a>
+<span class="sourceLineNo">019</span>import java.util.logging.Logger;<a name="line.19"></a>
+<span class="sourceLineNo">020</span>import jtb.syntaxtree.*;<a name="line.20"></a>
+<span class="sourceLineNo">021</span>import jtb.visitor.TreeDumper;<a name="line.21"></a>
+<span class="sourceLineNo">022</span>import jtb.visitor.TreeFormatter;<a name="line.22"></a>
+<span class="sourceLineNo">023</span>import org.checkerframework.checker.interning.qual.UsesObjectEquals;<a name="line.23"></a>
+<span class="sourceLineNo">024</span><a name="line.24"></a>
+<span class="sourceLineNo">025</span>/**<a name="line.25"></a>
+<span class="sourceLineNo">026</span> * Instruments a file to check invariant violations at runtime. Violated invariants are stored in a<a name="line.26"></a>
+<span class="sourceLineNo">027</span> * list in daikon.tools.runtimechecker.Runtime. The control flow of the class remains unchanged from<a name="line.27"></a>
+<span class="sourceLineNo">028</span> * the original.<a name="line.28"></a>
+<span class="sourceLineNo">029</span> *<a name="line.29"></a>
+<span class="sourceLineNo">030</span> * @author Carlos Pacheco<a name="line.30"></a>
+<span class="sourceLineNo">031</span> */<a name="line.31"></a>
+<span class="sourceLineNo">032</span>public class InstrumentHandler extends CommandHandler {<a name="line.32"></a>
+<span class="sourceLineNo">033</span><a name="line.33"></a>
+<span class="sourceLineNo">034</span>  @Override<a name="line.34"></a>
+<span class="sourceLineNo">035</span>  public boolean handles(String command) {<a name="line.35"></a>
+<span class="sourceLineNo">036</span>    if (command.equals("instrument")) {<a name="line.36"></a>
+<span class="sourceLineNo">037</span>      return true;<a name="line.37"></a>
+<span class="sourceLineNo">038</span>    }<a name="line.38"></a>
+<span class="sourceLineNo">039</span>    return false;<a name="line.39"></a>
+<span class="sourceLineNo">040</span>  }<a name="line.40"></a>
+<span class="sourceLineNo">041</span><a name="line.41"></a>
+<span class="sourceLineNo">042</span>  // If true, the instrumenter also outputs checker classes (classes that define<a name="line.42"></a>
+<span class="sourceLineNo">043</span>  // invariant-checking methods outside the instrumented class).<a name="line.43"></a>
+<span class="sourceLineNo">044</span>  private static boolean createCheckerClasses = false;<a name="line.44"></a>
+<span class="sourceLineNo">045</span><a name="line.45"></a>
+<span class="sourceLineNo">046</span>  public static final Logger debug =<a name="line.46"></a>
+<span class="sourceLineNo">047</span>      Logger.getLogger("daikon.tools.runtimechecker.InstrumentHandler");<a name="line.47"></a>
+<span class="sourceLineNo">048</span><a name="line.48"></a>
+<span class="sourceLineNo">049</span>  // If the --max_invariants_pp option is given, this variable is set<a name="line.49"></a>
+<span class="sourceLineNo">050</span>  // to the maximum number of invariants out annotate per program point.<a name="line.50"></a>
+<span class="sourceLineNo">051</span>  protected static int maxInvariantsPP = -1;<a name="line.51"></a>
+<span class="sourceLineNo">052</span><a name="line.52"></a>
+<span class="sourceLineNo">053</span>  // User documentation for these fields appears in file InstrumentHandler.doc<a name="line.53"></a>
+<span class="sourceLineNo">054</span>  private static final String make_all_fields_public_SWITCH = "make_all_fields_public";<a name="line.54"></a>
+<span class="sourceLineNo">055</span>  private static final String output_only_high_conf_invariants_SWITCH =<a name="line.55"></a>
+<span class="sourceLineNo">056</span>      "output_only_high_conf_invariants";<a name="line.56"></a>
+<span class="sourceLineNo">057</span>  private static final String create_checker_classes_SWITCH = "create_checker_classes";<a name="line.57"></a>
+<span class="sourceLineNo">058</span>  private static final String directory_SWITCH = "directory";<a name="line.58"></a>
+<span class="sourceLineNo">059</span>  private static final String checkers_directory_SWITCH = "checker_classes_directory";<a name="line.59"></a>
+<span class="sourceLineNo">060</span><a name="line.60"></a>
+<span class="sourceLineNo">061</span>  // Default values; can be overridden by the command-line switches above.<a name="line.61"></a>
+<span class="sourceLineNo">062</span>  private String instrumented_directory = "instrumented-classes";<a name="line.62"></a>
+<span class="sourceLineNo">063</span>  private String checkersOutputDirName = "checker-classes";<a name="line.63"></a>
+<span class="sourceLineNo">064</span><a name="line.64"></a>
+<span class="sourceLineNo">065</span>  @SuppressWarnings("enhancedfor.type.incompatible") // Checker Framework bug exposed on line "for<a name="line.65"></a>
+<span class="sourceLineNo">066</span>  // (TypeDeclaration decl : oneFile.roots) {"<a name="line.66"></a>
+<span class="sourceLineNo">067</span>  @Override<a name="line.67"></a>
+<span class="sourceLineNo">068</span>  public boolean handle(String[] args) {<a name="line.68"></a>
+<span class="sourceLineNo">069</span><a name="line.69"></a>
+<span class="sourceLineNo">070</span>    Daikon.output_format = daikon.inv.OutputFormat.JAVA;<a name="line.70"></a>
+<span class="sourceLineNo">071</span>    daikon.PrintInvariants.wrap_xml = true;<a name="line.71"></a>
+<span class="sourceLineNo">072</span><a name="line.72"></a>
+<span class="sourceLineNo">073</span>    if (!args[0].equals("instrument")) {<a name="line.73"></a>
+<span class="sourceLineNo">074</span>      System.err.println("Command (first argument) to instrumenter was not recognized.");<a name="line.74"></a>
+<span class="sourceLineNo">075</span>      return false;<a name="line.75"></a>
+<span class="sourceLineNo">076</span>    }<a name="line.76"></a>
+<span class="sourceLineNo">077</span><a name="line.77"></a>
+<span class="sourceLineNo">078</span>    String[] realArgs = new String[args.length - 1];<a name="line.78"></a>
+<span class="sourceLineNo">079</span>    for (int i = 0; i &lt; realArgs.length; i++) {<a name="line.79"></a>
+<span class="sourceLineNo">080</span>      realArgs[i] = args[i + 1];<a name="line.80"></a>
+<span class="sourceLineNo">081</span>    }<a name="line.81"></a>
+<span class="sourceLineNo">082</span>    Arguments arguments = readArguments(realArgs);<a name="line.82"></a>
+<span class="sourceLineNo">083</span>    if (arguments == errorWhileReadingArguments) {<a name="line.83"></a>
+<span class="sourceLineNo">084</span>      return false;<a name="line.84"></a>
+<span class="sourceLineNo">085</span>    }<a name="line.85"></a>
+<span class="sourceLineNo">086</span><a name="line.86"></a>
+<span class="sourceLineNo">087</span>    // Set up debug traces; note this comes after reading command line options.<a name="line.87"></a>
+<span class="sourceLineNo">088</span>    LogHelper.setupLogs(Global.debugAll ? LogHelper.FINE : LogHelper.INFO);<a name="line.88"></a>
+<span class="sourceLineNo">089</span><a name="line.89"></a>
+<span class="sourceLineNo">090</span>    // Create instrumented-classes dir.<a name="line.90"></a>
+<span class="sourceLineNo">091</span>    File outputDir = new File(instrumented_directory);<a name="line.91"></a>
+<span class="sourceLineNo">092</span><a name="line.92"></a>
+<span class="sourceLineNo">093</span>    System.out.println("Reading invariant file: " + arguments.invFile);<a name="line.93"></a>
+<span class="sourceLineNo">094</span>    PptMap ppts;<a name="line.94"></a>
+<span class="sourceLineNo">095</span>    try {<a name="line.95"></a>
+<span class="sourceLineNo">096</span>      ppts =<a name="line.96"></a>
+<span class="sourceLineNo">097</span>          FileIO.read_serialized_pptmap(new File(arguments.invFile), true /* use saved config */);<a name="line.97"></a>
+<span class="sourceLineNo">098</span>    } catch (IOException e) {<a name="line.98"></a>
+<span class="sourceLineNo">099</span>      System.err.println("Exception while reading invariant file " + arguments.invFile);<a name="line.99"></a>
+<span class="sourceLineNo">100</span>      System.err.println(e.getMessage());<a name="line.100"></a>
+<span class="sourceLineNo">101</span>      e.printStackTrace();<a name="line.101"></a>
+<span class="sourceLineNo">102</span>      return false;<a name="line.102"></a>
+<span class="sourceLineNo">103</span>    }<a name="line.103"></a>
+<span class="sourceLineNo">104</span><a name="line.104"></a>
+<span class="sourceLineNo">105</span>    // Compile original sources (because daikon.tools.jtb.Ast accesses<a name="line.105"></a>
+<span class="sourceLineNo">106</span>    // them via reflection).<a name="line.106"></a>
+<span class="sourceLineNo">107</span>    // compile(arguments.javaFileNames, "");<a name="line.107"></a>
+<span class="sourceLineNo">108</span><a name="line.108"></a>
+<span class="sourceLineNo">109</span>    // Create filenames including temp directory and package directories.<a name="line.109"></a>
+<span class="sourceLineNo">110</span>    List&lt;ParseResults&gt; parseResults =<a name="line.110"></a>
+<span class="sourceLineNo">111</span>        ParseResults.parse(arguments.javaFileNames, true /* discard comments */);<a name="line.111"></a>
+<span class="sourceLineNo">112</span><a name="line.112"></a>
+<span class="sourceLineNo">113</span>    for (ParseResults oneFile : parseResults) {<a name="line.113"></a>
+<span class="sourceLineNo">114</span><a name="line.114"></a>
+<span class="sourceLineNo">115</span>      System.out.println("Instrumenting " + oneFile.fileName);<a name="line.115"></a>
+<span class="sourceLineNo">116</span><a name="line.116"></a>
+<span class="sourceLineNo">117</span>      List&lt;CheckerClass&gt; checkerClasses = new ArrayList&lt;&gt;();<a name="line.117"></a>
+<span class="sourceLineNo">118</span><a name="line.118"></a>
+<span class="sourceLineNo">119</span>      for (TypeDeclaration decl : oneFile.roots) {<a name="line.119"></a>
+<span class="sourceLineNo">120</span><a name="line.120"></a>
+<span class="sourceLineNo">121</span>        InstrumentVisitor v = new InstrumentVisitor(ppts, decl);<a name="line.121"></a>
+<span class="sourceLineNo">122</span><a name="line.122"></a>
+<span class="sourceLineNo">123</span>        decl.accept(v);<a name="line.123"></a>
+<span class="sourceLineNo">124</span><a name="line.124"></a>
+<span class="sourceLineNo">125</span>        if (createCheckerClasses) {<a name="line.125"></a>
+<span class="sourceLineNo">126</span>          v.add_checkers_for_nondeclared_members();<a name="line.126"></a>
+<span class="sourceLineNo">127</span>          checkerClasses.addAll(v.checkerClasses.getCheckerClasses());<a name="line.127"></a>
+<span class="sourceLineNo">128</span>        }<a name="line.128"></a>
+<span class="sourceLineNo">129</span>      }<a name="line.129"></a>
+<span class="sourceLineNo">130</span><a name="line.130"></a>
+<span class="sourceLineNo">131</span>      try {<a name="line.131"></a>
+<span class="sourceLineNo">132</span><a name="line.132"></a>
+<span class="sourceLineNo">133</span>        File instrumentedFileDir =<a name="line.133"></a>
+<span class="sourceLineNo">134</span>            new File(<a name="line.134"></a>
+<span class="sourceLineNo">135</span>                outputDir.getPath()<a name="line.135"></a>
+<span class="sourceLineNo">136</span>                    + File.separator<a name="line.136"></a>
+<span class="sourceLineNo">137</span>                    + oneFile.packageName.replace(".", File.separator));<a name="line.137"></a>
+<span class="sourceLineNo">138</span><a name="line.138"></a>
+<span class="sourceLineNo">139</span>        if (!instrumentedFileDir.exists()) {<a name="line.139"></a>
+<span class="sourceLineNo">140</span>          instrumentedFileDir.mkdirs();<a name="line.140"></a>
+<span class="sourceLineNo">141</span>        }<a name="line.141"></a>
+<span class="sourceLineNo">142</span><a name="line.142"></a>
+<span class="sourceLineNo">143</span>        File checkerClassesDir =<a name="line.143"></a>
+<span class="sourceLineNo">144</span>            new File(<a name="line.144"></a>
+<span class="sourceLineNo">145</span>                checkersOutputDirName<a name="line.145"></a>
+<span class="sourceLineNo">146</span>                    + File.separator<a name="line.146"></a>
+<span class="sourceLineNo">147</span>                    + oneFile.packageName.replace(".", File.separator));<a name="line.147"></a>
+<span class="sourceLineNo">148</span><a name="line.148"></a>
+<span class="sourceLineNo">149</span>        if (!checkerClassesDir.exists()) {<a name="line.149"></a>
+<span class="sourceLineNo">150</span>          checkerClassesDir.mkdirs();<a name="line.150"></a>
+<span class="sourceLineNo">151</span>        }<a name="line.151"></a>
+<span class="sourceLineNo">152</span><a name="line.152"></a>
+<span class="sourceLineNo">153</span>        // Output instrumented class<a name="line.153"></a>
+<span class="sourceLineNo">154</span>        String instrumentedFileName = oneFile.fileName;<a name="line.154"></a>
+<span class="sourceLineNo">155</span>        File instrumentedFile = new File(instrumentedFileDir, instrumentedFileName);<a name="line.155"></a>
+<span class="sourceLineNo">156</span>        debug.fine("instrumented file name: " + instrumentedFile.getPath());<a name="line.156"></a>
+<span class="sourceLineNo">157</span>        System.out.println("Writing " + instrumentedFile);<a name="line.157"></a>
+<span class="sourceLineNo">158</span>        Writer output = Files.newBufferedWriter(instrumentedFile.toPath(), UTF_8);<a name="line.158"></a>
+<span class="sourceLineNo">159</span>        // Bug: JTB seems to order the modifiers in a non-standard way,<a name="line.159"></a>
+<span class="sourceLineNo">160</span>        // such as "static final public" instead of "public static final".<a name="line.160"></a>
+<span class="sourceLineNo">161</span>        oneFile.compilationUnit.accept(new TreeFormatter());<a name="line.161"></a>
+<span class="sourceLineNo">162</span>        TreeDumper dumper = new TreeDumper(output);<a name="line.162"></a>
+<span class="sourceLineNo">163</span>        dumper.printSpecials(false);<a name="line.163"></a>
+<span class="sourceLineNo">164</span>        oneFile.compilationUnit.accept(dumper);<a name="line.164"></a>
+<span class="sourceLineNo">165</span><a name="line.165"></a>
+<span class="sourceLineNo">166</span>        output.close();<a name="line.166"></a>
+<span class="sourceLineNo">167</span><a name="line.167"></a>
+<span class="sourceLineNo">168</span>        // Output checker classes<a name="line.168"></a>
+<span class="sourceLineNo">169</span>        for (CheckerClass cls : checkerClasses) {<a name="line.169"></a>
+<span class="sourceLineNo">170</span>          String checkerClassFileName = cls.getCheckerClassName() + ".java";<a name="line.170"></a>
+<span class="sourceLineNo">171</span>          File checkerClassFile = new File(checkerClassesDir, checkerClassFileName);<a name="line.171"></a>
+<span class="sourceLineNo">172</span>          System.out.println("Writing " + checkerClassFile);<a name="line.172"></a>
+<span class="sourceLineNo">173</span>          output = Files.newBufferedWriter(checkerClassFile.toPath(), UTF_8);<a name="line.173"></a>
+<span class="sourceLineNo">174</span>          CompilationUnit cu = cls.getCompilationUnit();<a name="line.174"></a>
+<span class="sourceLineNo">175</span>          cu.accept(new TreeFormatter());<a name="line.175"></a>
+<span class="sourceLineNo">176</span>          cu.accept(new TreeDumper(output));<a name="line.176"></a>
+<span class="sourceLineNo">177</span>        }<a name="line.177"></a>
+<span class="sourceLineNo">178</span><a name="line.178"></a>
+<span class="sourceLineNo">179</span>      } catch (IOException e) {<a name="line.179"></a>
+<span class="sourceLineNo">180</span>        System.err.println("Exception while instrumenting " + oneFile.fileName);<a name="line.180"></a>
+<span class="sourceLineNo">181</span>        System.err.println(e.getMessage());<a name="line.181"></a>
+<span class="sourceLineNo">182</span>        e.printStackTrace();<a name="line.182"></a>
+<span class="sourceLineNo">183</span>        return false;<a name="line.183"></a>
+<span class="sourceLineNo">184</span>      }<a name="line.184"></a>
+<span class="sourceLineNo">185</span>    }<a name="line.185"></a>
+<span class="sourceLineNo">186</span><a name="line.186"></a>
+<span class="sourceLineNo">187</span>    return true;<a name="line.187"></a>
+<span class="sourceLineNo">188</span>  }<a name="line.188"></a>
+<span class="sourceLineNo">189</span><a name="line.189"></a>
+<span class="sourceLineNo">190</span>  @UsesObjectEquals<a name="line.190"></a>
+<span class="sourceLineNo">191</span>  private static class Arguments {<a name="line.191"></a>
+<span class="sourceLineNo">192</span>    public String invFile;<a name="line.192"></a>
+<span class="sourceLineNo">193</span>    public List&lt;String&gt; javaFileNames;<a name="line.193"></a>
+<span class="sourceLineNo">194</span><a name="line.194"></a>
+<span class="sourceLineNo">195</span>    public Arguments(String invFile, List&lt;String&gt; javaFileNames) {<a name="line.195"></a>
+<span class="sourceLineNo">196</span>      this.invFile = invFile;<a name="line.196"></a>
+<span class="sourceLineNo">197</span>      this.javaFileNames = javaFileNames;<a name="line.197"></a>
+<span class="sourceLineNo">198</span>    }<a name="line.198"></a>
+<span class="sourceLineNo">199</span>  }<a name="line.199"></a>
+<span class="sourceLineNo">200</span><a name="line.200"></a>
+<span class="sourceLineNo">201</span>  private static Arguments errorWhileReadingArguments =<a name="line.201"></a>
+<span class="sourceLineNo">202</span>      new Arguments("error while reading arguments", new ArrayList&lt;String&gt;());<a name="line.202"></a>
+<span class="sourceLineNo">203</span><a name="line.203"></a>
+<span class="sourceLineNo">204</span>  private Arguments readArguments(String[] args) {<a name="line.204"></a>
+<span class="sourceLineNo">205</span><a name="line.205"></a>
+<span class="sourceLineNo">206</span>    LongOpt[] longopts =<a name="line.206"></a>
+<span class="sourceLineNo">207</span>        new LongOpt[] {<a name="line.207"></a>
+<span class="sourceLineNo">208</span>          new LongOpt(Daikon.debugAll_SWITCH, LongOpt.NO_ARGUMENT, null, 0),<a name="line.208"></a>
+<span class="sourceLineNo">209</span>          new LongOpt(Daikon.debug_SWITCH, LongOpt.REQUIRED_ARGUMENT, null, 0),<a name="line.209"></a>
+<span class="sourceLineNo">210</span>          new LongOpt(output_only_high_conf_invariants_SWITCH, LongOpt.NO_ARGUMENT, null, 0),<a name="line.210"></a>
+<span class="sourceLineNo">211</span>          new LongOpt(make_all_fields_public_SWITCH, LongOpt.NO_ARGUMENT, null, 0),<a name="line.211"></a>
+<span class="sourceLineNo">212</span>          new LongOpt(create_checker_classes_SWITCH, LongOpt.NO_ARGUMENT, null, 0),<a name="line.212"></a>
+<span class="sourceLineNo">213</span>          new LongOpt(directory_SWITCH, LongOpt.REQUIRED_ARGUMENT, null, 0),<a name="line.213"></a>
+<span class="sourceLineNo">214</span>          new LongOpt(checkers_directory_SWITCH, LongOpt.REQUIRED_ARGUMENT, null, 0)<a name="line.214"></a>
+<span class="sourceLineNo">215</span>        };<a name="line.215"></a>
+<span class="sourceLineNo">216</span>    Getopt g = new Getopt("daikon.tools.runtimechecker.InstrumentHandler", args, "hs", longopts);<a name="line.216"></a>
+<span class="sourceLineNo">217</span>    int c;<a name="line.217"></a>
+<span class="sourceLineNo">218</span>    while ((c = g.getopt()) != -1) {<a name="line.218"></a>
+<span class="sourceLineNo">219</span>      switch (c) {<a name="line.219"></a>
+<span class="sourceLineNo">220</span>        case 0:<a name="line.220"></a>
+<span class="sourceLineNo">221</span>          // got a long option<a name="line.221"></a>
+<span class="sourceLineNo">222</span>          String option_name = longopts[g.getLongind()].getName();<a name="line.222"></a>
+<span class="sourceLineNo">223</span><a name="line.223"></a>
+<span class="sourceLineNo">224</span>          if (create_checker_classes_SWITCH.equals(option_name)) {<a name="line.224"></a>
+<span class="sourceLineNo">225</span>            createCheckerClasses = true;<a name="line.225"></a>
+<span class="sourceLineNo">226</span>          } else if (output_only_high_conf_invariants_SWITCH.equals(option_name)) {<a name="line.226"></a>
+<span class="sourceLineNo">227</span>            InstrumentVisitor.outputOnlyHighConfInvariants = true;<a name="line.227"></a>
+<span class="sourceLineNo">228</span>          } else if (make_all_fields_public_SWITCH.equals(option_name)) {<a name="line.228"></a>
+<span class="sourceLineNo">229</span>            InstrumentVisitor.makeAllFieldsPublic = true;<a name="line.229"></a>
+<span class="sourceLineNo">230</span>          } else if (directory_SWITCH.equals(option_name)) {<a name="line.230"></a>
+<span class="sourceLineNo">231</span>            instrumented_directory = Daikon.getOptarg(g);<a name="line.231"></a>
+<span class="sourceLineNo">232</span>          } else if (checkers_directory_SWITCH.equals(option_name)) {<a name="line.232"></a>
+<span class="sourceLineNo">233</span>            checkersOutputDirName = Daikon.getOptarg(g);<a name="line.233"></a>
+<span class="sourceLineNo">234</span>          } else if (Daikon.debugAll_SWITCH.equals(option_name)) {<a name="line.234"></a>
+<span class="sourceLineNo">235</span>            Global.debugAll = true;<a name="line.235"></a>
+<span class="sourceLineNo">236</span>          } else if (Daikon.debug_SWITCH.equals(option_name)) {<a name="line.236"></a>
+<span class="sourceLineNo">237</span>            LogHelper.setLevel(Daikon.getOptarg(g), LogHelper.FINE);<a name="line.237"></a>
+<span class="sourceLineNo">238</span>          } else {<a name="line.238"></a>
+<span class="sourceLineNo">239</span>            System.err.println("Unknown long option received: " + option_name);<a name="line.239"></a>
+<span class="sourceLineNo">240</span>          }<a name="line.240"></a>
+<span class="sourceLineNo">241</span>          break;<a name="line.241"></a>
+<span class="sourceLineNo">242</span>        default:<a name="line.242"></a>
+<span class="sourceLineNo">243</span>          System.out.println("unrecognized option" + c);<a name="line.243"></a>
+<span class="sourceLineNo">244</span>          return errorWhileReadingArguments;<a name="line.244"></a>
+<span class="sourceLineNo">245</span>      }<a name="line.245"></a>
+<span class="sourceLineNo">246</span>    }<a name="line.246"></a>
+<span class="sourceLineNo">247</span>    // The index of the first non-option argument -- the name of the<a name="line.247"></a>
+<span class="sourceLineNo">248</span>    // invariant file.<a name="line.248"></a>
+<span class="sourceLineNo">249</span>    int argindex = g.getOptind();<a name="line.249"></a>
+<span class="sourceLineNo">250</span>    if (argindex &gt;= args.length) {<a name="line.250"></a>
+<span class="sourceLineNo">251</span>      System.out.println("Error: No .inv file or .java file arguments supplied.");<a name="line.251"></a>
+<span class="sourceLineNo">252</span>      return errorWhileReadingArguments;<a name="line.252"></a>
+<span class="sourceLineNo">253</span>    }<a name="line.253"></a>
+<span class="sourceLineNo">254</span>    String invfile = args[argindex];<a name="line.254"></a>
+<span class="sourceLineNo">255</span>    argindex++;<a name="line.255"></a>
+<span class="sourceLineNo">256</span>    if (!(invfile.endsWith(".inv") || invfile.endsWith(".inv.gz"))) {<a name="line.256"></a>
+<span class="sourceLineNo">257</span>      System.out.println("Error: first argument must be a file ending in .inv or .inv.gz.");<a name="line.257"></a>
+<span class="sourceLineNo">258</span>      return errorWhileReadingArguments;<a name="line.258"></a>
+<span class="sourceLineNo">259</span>    }<a name="line.259"></a>
+<span class="sourceLineNo">260</span>    if (argindex &gt;= args.length) {<a name="line.260"></a>
+<span class="sourceLineNo">261</span>      System.out.println("Error: No .java file arguments supplied.");<a name="line.261"></a>
+<span class="sourceLineNo">262</span>      return errorWhileReadingArguments;<a name="line.262"></a>
+<span class="sourceLineNo">263</span>    }<a name="line.263"></a>
+<span class="sourceLineNo">264</span>    List&lt;String&gt; javaFileNames = new ArrayList&lt;&gt;();<a name="line.264"></a>
+<span class="sourceLineNo">265</span>    for (; argindex &lt; args.length; argindex++) {<a name="line.265"></a>
+<span class="sourceLineNo">266</span>      String javafile = args[argindex];<a name="line.266"></a>
+<span class="sourceLineNo">267</span>      if (!javafile.endsWith(".java")) {<a name="line.267"></a>
+<span class="sourceLineNo">268</span>        System.out.println("File does not end in .java: " + javafile);<a name="line.268"></a>
+<span class="sourceLineNo">269</span>        return errorWhileReadingArguments;<a name="line.269"></a>
+<span class="sourceLineNo">270</span>      }<a name="line.270"></a>
+<span class="sourceLineNo">271</span>      javaFileNames.add(javafile);<a name="line.271"></a>
+<span class="sourceLineNo">272</span>    }<a name="line.272"></a>
+<span class="sourceLineNo">273</span><a name="line.273"></a>
+<span class="sourceLineNo">274</span>    return new Arguments(invfile, javaFileNames);<a name="line.274"></a>
+<span class="sourceLineNo">275</span>  }<a name="line.275"></a>
+<span class="sourceLineNo">276</span>}<a name="line.276"></a>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</pre>
+</div>
+</body>
+</html>

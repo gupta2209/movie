@@ -1,0 +1,230 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<html lang="en">
+<head><link rel="icon" href="../../../daikon-favicon.png" type="image/png"/>
+<title>Source code</title>
+<link rel="stylesheet" type="text/css" href="../../../stylesheet.css" title="Style">
+</head>
+<body>
+<div class="sourceContainer">
+<pre><span class="sourceLineNo">001</span>package daikon.chicory;<a name="line.1"></a>
+<span class="sourceLineNo">002</span><a name="line.2"></a>
+<span class="sourceLineNo">003</span>import java.lang.reflect.Constructor;<a name="line.3"></a>
+<span class="sourceLineNo">004</span>import java.lang.reflect.Method;<a name="line.4"></a>
+<span class="sourceLineNo">005</span>import java.lang.reflect.Modifier;<a name="line.5"></a>
+<span class="sourceLineNo">006</span>import java.util.Arrays;<a name="line.6"></a>
+<span class="sourceLineNo">007</span><a name="line.7"></a>
+<span class="sourceLineNo">008</span>/**<a name="line.8"></a>
+<span class="sourceLineNo">009</span> * This is a subtype of DaikonVariableInfo and is used as a "placeholder" for the root of the tree.<a name="line.9"></a>
+<span class="sourceLineNo">010</span> * It contains no variable information other than what is stored in its children.<a name="line.10"></a>
+<span class="sourceLineNo">011</span> */<a name="line.11"></a>
+<span class="sourceLineNo">012</span>@SuppressWarnings("nullness") // to do<a name="line.12"></a>
+<span class="sourceLineNo">013</span>public class RootInfo extends DaikonVariableInfo {<a name="line.13"></a>
+<span class="sourceLineNo">014</span>  private RootInfo() {<a name="line.14"></a>
+<span class="sourceLineNo">015</span>    // the root needs no name, etc. but set them to preserve nullness property<a name="line.15"></a>
+<span class="sourceLineNo">016</span>    super(" RootInfo Object ", " RootInfo Object type ", " RootInfo Object reptype ");<a name="line.16"></a>
+<span class="sourceLineNo">017</span>  }<a name="line.17"></a>
+<span class="sourceLineNo">018</span><a name="line.18"></a>
+<span class="sourceLineNo">019</span>  @Override<a name="line.19"></a>
+<span class="sourceLineNo">020</span>  public Object getMyValFromParentVal(Object value) {<a name="line.20"></a>
+<span class="sourceLineNo">021</span>    throw new RuntimeException("No val for RootInfo");<a name="line.21"></a>
+<span class="sourceLineNo">022</span>  }<a name="line.22"></a>
+<span class="sourceLineNo">023</span><a name="line.23"></a>
+<span class="sourceLineNo">024</span>  /** Creates a RootInfo object for a method entry program point. */<a name="line.24"></a>
+<span class="sourceLineNo">025</span>  public static RootInfo enter_process(MethodInfo mi, int depth) {<a name="line.25"></a>
+<span class="sourceLineNo">026</span>    // debug_vars.clear("Building enter tree for %s:%s%n", mi.method_name, mi);<a name="line.26"></a>
+<span class="sourceLineNo">027</span><a name="line.27"></a>
+<span class="sourceLineNo">028</span>    RootInfo root = new RootInfo();<a name="line.28"></a>
+<span class="sourceLineNo">029</span><a name="line.29"></a>
+<span class="sourceLineNo">030</span>    // Don't build a tree for class initializers.<a name="line.30"></a>
+<span class="sourceLineNo">031</span>    if (mi.is_class_init()) {<a name="line.31"></a>
+<span class="sourceLineNo">032</span>      return root;<a name="line.32"></a>
+<span class="sourceLineNo">033</span>    }<a name="line.33"></a>
+<span class="sourceLineNo">034</span><a name="line.34"></a>
+<span class="sourceLineNo">035</span>    // Clear the set of static variables<a name="line.35"></a>
+<span class="sourceLineNo">036</span>    ppt_statics.clear();<a name="line.36"></a>
+<span class="sourceLineNo">037</span><a name="line.37"></a>
+<span class="sourceLineNo">038</span>    // Print class variables.   Print class variables first because<a name="line.38"></a>
+<span class="sourceLineNo">039</span>    // the depth goes deeper there ('this' is not counted).  This<a name="line.39"></a>
+<span class="sourceLineNo">040</span>    // guarantees that any static variables in the class are found here<a name="line.40"></a>
+<span class="sourceLineNo">041</span>    // and not below.<a name="line.41"></a>
+<span class="sourceLineNo">042</span>    if (!(mi.member instanceof Constructor&lt;?&gt;)) {<a name="line.42"></a>
+<span class="sourceLineNo">043</span>      root.addClassVars(<a name="line.43"></a>
+<span class="sourceLineNo">044</span>          mi.class_info,<a name="line.44"></a>
+<span class="sourceLineNo">045</span>          Modifier.isStatic(mi.member.getModifiers()),<a name="line.45"></a>
+<span class="sourceLineNo">046</span>          mi.member.getDeclaringClass(),<a name="line.46"></a>
+<span class="sourceLineNo">047</span>          /*offset = */ "",<a name="line.47"></a>
+<span class="sourceLineNo">048</span>          depth);<a name="line.48"></a>
+<span class="sourceLineNo">049</span>    }<a name="line.49"></a>
+<span class="sourceLineNo">050</span><a name="line.50"></a>
+<span class="sourceLineNo">051</span>    // Print each parameter<a name="line.51"></a>
+<span class="sourceLineNo">052</span>    root.addParameters(mi.class_info, mi.member, Arrays.&lt;String&gt;asList(mi.arg_names), depth);<a name="line.52"></a>
+<span class="sourceLineNo">053</span><a name="line.53"></a>
+<span class="sourceLineNo">054</span>    // debug_vars.log("exit enter_process%n");<a name="line.54"></a>
+<span class="sourceLineNo">055</span><a name="line.55"></a>
+<span class="sourceLineNo">056</span>    return root;<a name="line.56"></a>
+<span class="sourceLineNo">057</span>  }<a name="line.57"></a>
+<span class="sourceLineNo">058</span><a name="line.58"></a>
+<span class="sourceLineNo">059</span>  /** Creates a RootInfo object for a method exit program point. */<a name="line.59"></a>
+<span class="sourceLineNo">060</span>  public static RootInfo exit_process(MethodInfo mi, int depth) {<a name="line.60"></a>
+<span class="sourceLineNo">061</span>    // debug_vars.clear("Building exit tree for %s%n", mi);<a name="line.61"></a>
+<span class="sourceLineNo">062</span><a name="line.62"></a>
+<span class="sourceLineNo">063</span>    RootInfo root = new RootInfo();<a name="line.63"></a>
+<span class="sourceLineNo">064</span><a name="line.64"></a>
+<span class="sourceLineNo">065</span>    // Don't build a tree for class initializers.<a name="line.65"></a>
+<span class="sourceLineNo">066</span>    if (mi.is_class_init()) {<a name="line.66"></a>
+<span class="sourceLineNo">067</span>      return root;<a name="line.67"></a>
+<span class="sourceLineNo">068</span>    }<a name="line.68"></a>
+<span class="sourceLineNo">069</span><a name="line.69"></a>
+<span class="sourceLineNo">070</span>    // Clear the set of static variables<a name="line.70"></a>
+<span class="sourceLineNo">071</span>    ppt_statics.clear();<a name="line.71"></a>
+<span class="sourceLineNo">072</span><a name="line.72"></a>
+<span class="sourceLineNo">073</span>    // Print class variables.   Print class variables first because<a name="line.73"></a>
+<span class="sourceLineNo">074</span>    // the depth goes deeper there ('this' is not counted).  This<a name="line.74"></a>
+<span class="sourceLineNo">075</span>    // guarantees that any static variables in the class are found here<a name="line.75"></a>
+<span class="sourceLineNo">076</span>    // and not below.<a name="line.76"></a>
+<span class="sourceLineNo">077</span>    root.addClassVars(<a name="line.77"></a>
+<span class="sourceLineNo">078</span>        mi.class_info,<a name="line.78"></a>
+<span class="sourceLineNo">079</span>        Modifier.isStatic(mi.member.getModifiers()),<a name="line.79"></a>
+<span class="sourceLineNo">080</span>        mi.member.getDeclaringClass(),<a name="line.80"></a>
+<span class="sourceLineNo">081</span>        "",<a name="line.81"></a>
+<span class="sourceLineNo">082</span>        depth);<a name="line.82"></a>
+<span class="sourceLineNo">083</span><a name="line.83"></a>
+<span class="sourceLineNo">084</span>    // Print arguments<a name="line.84"></a>
+<span class="sourceLineNo">085</span>    root.addParameters(mi.class_info, mi.member, Arrays.&lt;String&gt;asList(mi.arg_names), depth);<a name="line.85"></a>
+<span class="sourceLineNo">086</span><a name="line.86"></a>
+<span class="sourceLineNo">087</span>    // Print return type information for methods only and not constructors<a name="line.87"></a>
+<span class="sourceLineNo">088</span>    if (mi.member instanceof Method) {<a name="line.88"></a>
+<span class="sourceLineNo">089</span>      Class&lt;?&gt; returnType = ((Method) mi.member).getReturnType();<a name="line.89"></a>
+<span class="sourceLineNo">090</span>      if (!returnType.equals(Void.TYPE)) {<a name="line.90"></a>
+<span class="sourceLineNo">091</span>        // add a new ReturnInfo object to the traversal tree<a name="line.91"></a>
+<span class="sourceLineNo">092</span>        DaikonVariableInfo retInfo = new ReturnInfo(returnType);<a name="line.92"></a>
+<span class="sourceLineNo">093</span><a name="line.93"></a>
+<span class="sourceLineNo">094</span>        root.addChild(retInfo);<a name="line.94"></a>
+<span class="sourceLineNo">095</span><a name="line.95"></a>
+<span class="sourceLineNo">096</span>        retInfo.checkForDerivedVariables(returnType, "return", "");<a name="line.96"></a>
+<span class="sourceLineNo">097</span><a name="line.97"></a>
+<span class="sourceLineNo">098</span>        retInfo.addChildNodes(mi.class_info, returnType, "return", "", depth);<a name="line.98"></a>
+<span class="sourceLineNo">099</span>      }<a name="line.99"></a>
+<span class="sourceLineNo">100</span>    }<a name="line.100"></a>
+<span class="sourceLineNo">101</span><a name="line.101"></a>
+<span class="sourceLineNo">102</span>    // debug_vars.log("exit exit_process%n");<a name="line.102"></a>
+<span class="sourceLineNo">103</span><a name="line.103"></a>
+<span class="sourceLineNo">104</span>    return root;<a name="line.104"></a>
+<span class="sourceLineNo">105</span>  }<a name="line.105"></a>
+<span class="sourceLineNo">106</span><a name="line.106"></a>
+<span class="sourceLineNo">107</span>  /**<a name="line.107"></a>
+<span class="sourceLineNo">108</span>   * Creates a new RootInfo object for an object program point. This will include the class' fields<a name="line.108"></a>
+<span class="sourceLineNo">109</span>   * and the "this" object.<a name="line.109"></a>
+<span class="sourceLineNo">110</span>   *<a name="line.110"></a>
+<span class="sourceLineNo">111</span>   * @param cinfo information about the class<a name="line.111"></a>
+<span class="sourceLineNo">112</span>   * @param depth the depth to which to nest variables, as in "a.b.field"<a name="line.112"></a>
+<span class="sourceLineNo">113</span>   * @return a a new RootInfo object for an object program point<a name="line.113"></a>
+<span class="sourceLineNo">114</span>   */<a name="line.114"></a>
+<span class="sourceLineNo">115</span>  public static RootInfo getObjectPpt(ClassInfo cinfo, int depth) {<a name="line.115"></a>
+<span class="sourceLineNo">116</span>    // debug_vars.clear("enter getObjectPpt: %s%n", cinfo);<a name="line.116"></a>
+<span class="sourceLineNo">117</span><a name="line.117"></a>
+<span class="sourceLineNo">118</span>    RootInfo root = new RootInfo();<a name="line.118"></a>
+<span class="sourceLineNo">119</span><a name="line.119"></a>
+<span class="sourceLineNo">120</span>    // Clear the set of static variables<a name="line.120"></a>
+<span class="sourceLineNo">121</span>    ppt_statics.clear();<a name="line.121"></a>
+<span class="sourceLineNo">122</span><a name="line.122"></a>
+<span class="sourceLineNo">123</span>    root.addClassVars(<a name="line.123"></a>
+<span class="sourceLineNo">124</span>        cinfo, /*dontPrintInstanceVars = */ false, cinfo.clazz, /*offset = */ "", depth);<a name="line.124"></a>
+<span class="sourceLineNo">125</span><a name="line.125"></a>
+<span class="sourceLineNo">126</span>    // debug_vars.log("exit getObjectPpt%n");<a name="line.126"></a>
+<span class="sourceLineNo">127</span><a name="line.127"></a>
+<span class="sourceLineNo">128</span>    return root;<a name="line.128"></a>
+<span class="sourceLineNo">129</span>  }<a name="line.129"></a>
+<span class="sourceLineNo">130</span><a name="line.130"></a>
+<span class="sourceLineNo">131</span>  /**<a name="line.131"></a>
+<span class="sourceLineNo">132</span>   * Creates a new RootInfo object for a class program point. This will just include static fields.<a name="line.132"></a>
+<span class="sourceLineNo">133</span>   *<a name="line.133"></a>
+<span class="sourceLineNo">134</span>   * @param cinfo information about the class<a name="line.134"></a>
+<span class="sourceLineNo">135</span>   * @param depth the depth to which to nest variables, as in "a.b.field"<a name="line.135"></a>
+<span class="sourceLineNo">136</span>   * @return a new RootInfo object for a class program point<a name="line.136"></a>
+<span class="sourceLineNo">137</span>   */<a name="line.137"></a>
+<span class="sourceLineNo">138</span>  public static RootInfo getClassPpt(ClassInfo cinfo, int depth) {<a name="line.138"></a>
+<span class="sourceLineNo">139</span>    // debug_vars.clear("enter getClassPpt: %s%n", cinfo);<a name="line.139"></a>
+<span class="sourceLineNo">140</span><a name="line.140"></a>
+<span class="sourceLineNo">141</span>    RootInfo root = new RootInfo();<a name="line.141"></a>
+<span class="sourceLineNo">142</span><a name="line.142"></a>
+<span class="sourceLineNo">143</span>    // Clear the set of static variables<a name="line.143"></a>
+<span class="sourceLineNo">144</span>    ppt_statics.clear();<a name="line.144"></a>
+<span class="sourceLineNo">145</span><a name="line.145"></a>
+<span class="sourceLineNo">146</span>    root.addClassVars(<a name="line.146"></a>
+<span class="sourceLineNo">147</span>        cinfo, /*dontPrintInstanceVars = */ true, cinfo.clazz, /*offset = */ "", depth);<a name="line.147"></a>
+<span class="sourceLineNo">148</span><a name="line.148"></a>
+<span class="sourceLineNo">149</span>    // debug_vars.log("exit getClassPpt%n");<a name="line.149"></a>
+<span class="sourceLineNo">150</span><a name="line.150"></a>
+<span class="sourceLineNo">151</span>    return root;<a name="line.151"></a>
+<span class="sourceLineNo">152</span>  }<a name="line.152"></a>
+<span class="sourceLineNo">153</span><a name="line.153"></a>
+<span class="sourceLineNo">154</span>  @Override<a name="line.154"></a>
+<span class="sourceLineNo">155</span>  public VarKind get_var_kind() {<a name="line.155"></a>
+<span class="sourceLineNo">156</span>    throw new RuntimeException("No var-kind for RootInfo");<a name="line.156"></a>
+<span class="sourceLineNo">157</span>  }<a name="line.157"></a>
+<span class="sourceLineNo">158</span>}<a name="line.158"></a>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</pre>
+</div>
+</body>
+</html>

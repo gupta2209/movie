@@ -1,0 +1,349 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<html lang="en">
+<head><link rel="icon" href="../../../../daikon-favicon.png" type="image/png"/>
+<title>Source code</title>
+<link rel="stylesheet" type="text/css" href="../../../../stylesheet.css" title="Style">
+</head>
+<body>
+<div class="sourceContainer">
+<pre><span class="sourceLineNo">001</span>package daikon.tools.jtb;<a name="line.1"></a>
+<span class="sourceLineNo">002</span><a name="line.2"></a>
+<span class="sourceLineNo">003</span>import static java.nio.charset.StandardCharsets.UTF_8;<a name="line.3"></a>
+<span class="sourceLineNo">004</span><a name="line.4"></a>
+<span class="sourceLineNo">005</span>import daikon.*;<a name="line.5"></a>
+<span class="sourceLineNo">006</span>import gnu.getopt.*;<a name="line.6"></a>
+<span class="sourceLineNo">007</span>import java.io.IOException;<a name="line.7"></a>
+<span class="sourceLineNo">008</span>import java.io.PrintWriter;<a name="line.8"></a>
+<span class="sourceLineNo">009</span>import java.io.Reader;<a name="line.9"></a>
+<span class="sourceLineNo">010</span>import java.nio.file.Files;<a name="line.10"></a>
+<span class="sourceLineNo">011</span>import java.nio.file.Paths;<a name="line.11"></a>
+<span class="sourceLineNo">012</span>import java.util.Collections;<a name="line.12"></a>
+<span class="sourceLineNo">013</span>import java.util.List;<a name="line.13"></a>
+<span class="sourceLineNo">014</span>import java.util.Map;<a name="line.14"></a>
+<span class="sourceLineNo">015</span>import java.util.logging.Logger;<a name="line.15"></a>
+<span class="sourceLineNo">016</span>import jtb.JavaParser;<a name="line.16"></a>
+<span class="sourceLineNo">017</span>import jtb.ParseException;<a name="line.17"></a>
+<span class="sourceLineNo">018</span>import jtb.syntaxtree.*;<a name="line.18"></a>
+<span class="sourceLineNo">019</span>import org.checkerframework.checker.nullness.qual.KeyFor;<a name="line.19"></a>
+<span class="sourceLineNo">020</span>import org.checkerframework.checker.nullness.qual.Nullable;<a name="line.20"></a>
+<span class="sourceLineNo">021</span>import org.plumelib.util.CollectionsPlume;<a name="line.21"></a>
+<span class="sourceLineNo">022</span>import org.plumelib.util.UtilPlume;<a name="line.22"></a>
+<span class="sourceLineNo">023</span><a name="line.23"></a>
+<span class="sourceLineNo">024</span>/**<a name="line.24"></a>
+<span class="sourceLineNo">025</span> * Create a splitter info file from Java source.<a name="line.25"></a>
+<span class="sourceLineNo">026</span> *<a name="line.26"></a>
+<span class="sourceLineNo">027</span> * &lt;p&gt;The argument is a list of {@code .java} files. The original {@code .java} files are left<a name="line.27"></a>
+<span class="sourceLineNo">028</span> * unmodified. A {@code .spinfo} file is written for every {@code .java} file, or in the single file<a name="line.28"></a>
+<span class="sourceLineNo">029</span> * indicated as the {@code -o} command-line argument..<a name="line.29"></a>
+<span class="sourceLineNo">030</span> */<a name="line.30"></a>
+<span class="sourceLineNo">031</span>public class CreateSpinfo {<a name="line.31"></a>
+<span class="sourceLineNo">032</span><a name="line.32"></a>
+<span class="sourceLineNo">033</span>  // The expressions in the Java source are extracted as follows:<a name="line.33"></a>
+<span class="sourceLineNo">034</span>  // For each method:<a name="line.34"></a>
+<span class="sourceLineNo">035</span>  //  * extracts all expressions in conditional statements<a name="line.35"></a>
+<span class="sourceLineNo">036</span>  //    ie. if, for, which, etc.<a name="line.36"></a>
+<span class="sourceLineNo">037</span>  //  * if the method body is a one-line return statement, it<a name="line.37"></a>
+<span class="sourceLineNo">038</span>  //    extracts it for later substitution into expressions which<a name="line.38"></a>
+<span class="sourceLineNo">039</span>  //    call this function. These statements are referred to as<a name="line.39"></a>
+<span class="sourceLineNo">040</span>  //    replace statements<a name="line.40"></a>
+<span class="sourceLineNo">041</span>  // For each field declaration<a name="line.41"></a>
+<span class="sourceLineNo">042</span>  //  * if the field is a boolean, it stores the expression<a name="line.42"></a>
+<span class="sourceLineNo">043</span>  //    "&lt;fieldname&gt; == true" as a splitting condition.<a name="line.43"></a>
+<span class="sourceLineNo">044</span>  //<a name="line.44"></a>
+<span class="sourceLineNo">045</span>  //  The method printSpinfoFile prints out these expressions and<a name="line.45"></a>
+<span class="sourceLineNo">046</span>  //  replace statements in splitter info file format.<a name="line.46"></a>
+<span class="sourceLineNo">047</span><a name="line.47"></a>
+<span class="sourceLineNo">048</span>  public static final Logger debug = Logger.getLogger("daikon.tools.jtb.CreateSpinfo");<a name="line.48"></a>
+<span class="sourceLineNo">049</span><a name="line.49"></a>
+<span class="sourceLineNo">050</span>  private static String usage =<a name="line.50"></a>
+<span class="sourceLineNo">051</span>      UtilPlume.joinLines(<a name="line.51"></a>
+<span class="sourceLineNo">052</span>          "Usage:  java daikon.tools.CreateSpinfo FILE.java ...",<a name="line.52"></a>
+<span class="sourceLineNo">053</span>          "  -o outputfile   Put all output in specified file",<a name="line.53"></a>
+<span class="sourceLineNo">054</span>          "  -h              Display this usage message");<a name="line.54"></a>
+<span class="sourceLineNo">055</span><a name="line.55"></a>
+<span class="sourceLineNo">056</span>  public static void main(String[] args) throws IOException {<a name="line.56"></a>
+<span class="sourceLineNo">057</span>    try {<a name="line.57"></a>
+<span class="sourceLineNo">058</span>      mainHelper(args);<a name="line.58"></a>
+<span class="sourceLineNo">059</span>    } catch (Daikon.DaikonTerminationException e) {<a name="line.59"></a>
+<span class="sourceLineNo">060</span>      Daikon.handleDaikonTerminationException(e);<a name="line.60"></a>
+<span class="sourceLineNo">061</span>    }<a name="line.61"></a>
+<span class="sourceLineNo">062</span>  }<a name="line.62"></a>
+<span class="sourceLineNo">063</span><a name="line.63"></a>
+<span class="sourceLineNo">064</span>  /**<a name="line.64"></a>
+<span class="sourceLineNo">065</span>   * This does the work of {@link #main(String[])}, but it never calls System.exit, so it is<a name="line.65"></a>
+<span class="sourceLineNo">066</span>   * appropriate to be called progrmmatically.<a name="line.66"></a>
+<span class="sourceLineNo">067</span>   */<a name="line.67"></a>
+<span class="sourceLineNo">068</span>  public static void mainHelper(final String[] args) throws IOException {<a name="line.68"></a>
+<span class="sourceLineNo">069</span><a name="line.69"></a>
+<span class="sourceLineNo">070</span>    // If not set, put output in files named after the input (source) files.<a name="line.70"></a>
+<span class="sourceLineNo">071</span>    String outputfilename = null;<a name="line.71"></a>
+<span class="sourceLineNo">072</span><a name="line.72"></a>
+<span class="sourceLineNo">073</span>    daikon.LogHelper.setupLogs(daikon.LogHelper.INFO);<a name="line.73"></a>
+<span class="sourceLineNo">074</span>    LongOpt[] longopts =<a name="line.74"></a>
+<span class="sourceLineNo">075</span>        new LongOpt[] {<a name="line.75"></a>
+<span class="sourceLineNo">076</span>          new LongOpt(Daikon.help_SWITCH, LongOpt.NO_ARGUMENT, null, 0),<a name="line.76"></a>
+<span class="sourceLineNo">077</span>          new LongOpt(Daikon.debugAll_SWITCH, LongOpt.NO_ARGUMENT, null, 0),<a name="line.77"></a>
+<span class="sourceLineNo">078</span>          new LongOpt(Daikon.debug_SWITCH, LongOpt.REQUIRED_ARGUMENT, null, 0),<a name="line.78"></a>
+<span class="sourceLineNo">079</span>        };<a name="line.79"></a>
+<span class="sourceLineNo">080</span><a name="line.80"></a>
+<span class="sourceLineNo">081</span>    Getopt g = new Getopt("daikon.tools.jtb.CreateSpinfo", args, "ho:", longopts);<a name="line.81"></a>
+<span class="sourceLineNo">082</span>    int c;<a name="line.82"></a>
+<span class="sourceLineNo">083</span>    while ((c = g.getopt()) != -1) {<a name="line.83"></a>
+<span class="sourceLineNo">084</span>      switch (c) {<a name="line.84"></a>
+<span class="sourceLineNo">085</span>        case 0:<a name="line.85"></a>
+<span class="sourceLineNo">086</span>          // got a long option<a name="line.86"></a>
+<span class="sourceLineNo">087</span>          String option_name = longopts[g.getLongind()].getName();<a name="line.87"></a>
+<span class="sourceLineNo">088</span>          if (Daikon.help_SWITCH.equals(option_name)) {<a name="line.88"></a>
+<span class="sourceLineNo">089</span>            System.out.println(usage);<a name="line.89"></a>
+<span class="sourceLineNo">090</span>            throw new Daikon.NormalTermination();<a name="line.90"></a>
+<span class="sourceLineNo">091</span>          } else if (Daikon.debugAll_SWITCH.equals(option_name)) {<a name="line.91"></a>
+<span class="sourceLineNo">092</span>            Global.debugAll = true;<a name="line.92"></a>
+<span class="sourceLineNo">093</span>          } else if (Daikon.debug_SWITCH.equals(option_name)) {<a name="line.93"></a>
+<span class="sourceLineNo">094</span>            LogHelper.setLevel(Daikon.getOptarg(g), LogHelper.FINE);<a name="line.94"></a>
+<span class="sourceLineNo">095</span>          } else {<a name="line.95"></a>
+<span class="sourceLineNo">096</span>            throw new RuntimeException("Unknown long option received: " + option_name);<a name="line.96"></a>
+<span class="sourceLineNo">097</span>          }<a name="line.97"></a>
+<span class="sourceLineNo">098</span>          break;<a name="line.98"></a>
+<span class="sourceLineNo">099</span>        case 'o':<a name="line.99"></a>
+<span class="sourceLineNo">100</span>          outputfilename = Daikon.getOptarg(g);<a name="line.100"></a>
+<span class="sourceLineNo">101</span>          break;<a name="line.101"></a>
+<span class="sourceLineNo">102</span>        case 'h':<a name="line.102"></a>
+<span class="sourceLineNo">103</span>          System.out.println(usage);<a name="line.103"></a>
+<span class="sourceLineNo">104</span>          throw new Daikon.NormalTermination();<a name="line.104"></a>
+<span class="sourceLineNo">105</span>        case '?':<a name="line.105"></a>
+<span class="sourceLineNo">106</span>          break; // getopt() already printed an error<a name="line.106"></a>
+<span class="sourceLineNo">107</span>        default:<a name="line.107"></a>
+<span class="sourceLineNo">108</span>          System.out.println("getopt() returned " + c);<a name="line.108"></a>
+<span class="sourceLineNo">109</span>          break;<a name="line.109"></a>
+<span class="sourceLineNo">110</span>      }<a name="line.110"></a>
+<span class="sourceLineNo">111</span>    }<a name="line.111"></a>
+<span class="sourceLineNo">112</span><a name="line.112"></a>
+<span class="sourceLineNo">113</span>    // The index of the first non-option argument -- the name of the file<a name="line.113"></a>
+<span class="sourceLineNo">114</span>    int argindex = g.getOptind();<a name="line.114"></a>
+<span class="sourceLineNo">115</span>    if (argindex &gt;= args.length) {<a name="line.115"></a>
+<span class="sourceLineNo">116</span>      throw new Daikon.UserError(<a name="line.116"></a>
+<span class="sourceLineNo">117</span>          "Error: No .java file arguments supplied." + Global.lineSep + usage);<a name="line.117"></a>
+<span class="sourceLineNo">118</span>    }<a name="line.118"></a>
+<span class="sourceLineNo">119</span>    if (outputfilename != null) {<a name="line.119"></a>
+<span class="sourceLineNo">120</span>      PrintWriter output =<a name="line.120"></a>
+<span class="sourceLineNo">121</span>          new PrintWriter(Files.newBufferedWriter(Paths.get(outputfilename), UTF_8));<a name="line.121"></a>
+<span class="sourceLineNo">122</span>      for (; argindex &lt; args.length; argindex++) {<a name="line.122"></a>
+<span class="sourceLineNo">123</span>        String javaFileName = args[argindex];<a name="line.123"></a>
+<span class="sourceLineNo">124</span>        writeSplitters(javaFileName, output);<a name="line.124"></a>
+<span class="sourceLineNo">125</span>      }<a name="line.125"></a>
+<span class="sourceLineNo">126</span>      output.flush();<a name="line.126"></a>
+<span class="sourceLineNo">127</span>      output.close();<a name="line.127"></a>
+<span class="sourceLineNo">128</span>    } else {<a name="line.128"></a>
+<span class="sourceLineNo">129</span>      for (; argindex &lt; args.length; argindex++) {<a name="line.129"></a>
+<span class="sourceLineNo">130</span>        String javaFileName = args[argindex];<a name="line.130"></a>
+<span class="sourceLineNo">131</span>        String spinfoFileName = spinfoFileName(javaFileName);<a name="line.131"></a>
+<span class="sourceLineNo">132</span>        PrintWriter output =<a name="line.132"></a>
+<span class="sourceLineNo">133</span>            new PrintWriter(Files.newBufferedWriter(Paths.get(spinfoFileName), UTF_8));<a name="line.133"></a>
+<span class="sourceLineNo">134</span>        writeSplitters(javaFileName, output);<a name="line.134"></a>
+<span class="sourceLineNo">135</span>        output.flush();<a name="line.135"></a>
+<span class="sourceLineNo">136</span>        output.close();<a name="line.136"></a>
+<span class="sourceLineNo">137</span>      }<a name="line.137"></a>
+<span class="sourceLineNo">138</span>    }<a name="line.138"></a>
+<span class="sourceLineNo">139</span>  }<a name="line.139"></a>
+<span class="sourceLineNo">140</span><a name="line.140"></a>
+<span class="sourceLineNo">141</span>  /**<a name="line.141"></a>
+<span class="sourceLineNo">142</span>   * Returns the default name for a spinfo file created from a java file named javaFileName.<a name="line.142"></a>
+<span class="sourceLineNo">143</span>   *<a name="line.143"></a>
+<span class="sourceLineNo">144</span>   * @param javaFileName the name of the java file from which this spinfo file is being created<a name="line.144"></a>
+<span class="sourceLineNo">145</span>   */<a name="line.145"></a>
+<span class="sourceLineNo">146</span>  private static String spinfoFileName(String javaFileName) {<a name="line.146"></a>
+<span class="sourceLineNo">147</span>    if (javaFileName.endsWith(".java")) {<a name="line.147"></a>
+<span class="sourceLineNo">148</span>      return javaFileName.substring(0, javaFileName.length() - 5) + ".spinfo";<a name="line.148"></a>
+<span class="sourceLineNo">149</span>    }<a name="line.149"></a>
+<span class="sourceLineNo">150</span><a name="line.150"></a>
+<span class="sourceLineNo">151</span>    // The file does not end with ".java".  Proceed, but issue a warning.<a name="line.151"></a>
+<span class="sourceLineNo">152</span>    System.err.println(<a name="line.152"></a>
+<span class="sourceLineNo">153</span>        "Warning: CreateSpinfo input file " + javaFileName + "does not end in .java.");<a name="line.153"></a>
+<span class="sourceLineNo">154</span><a name="line.154"></a>
+<span class="sourceLineNo">155</span>    // change the file extension to .spinfo<a name="line.155"></a>
+<span class="sourceLineNo">156</span>    int dotPos = javaFileName.indexOf(".");<a name="line.156"></a>
+<span class="sourceLineNo">157</span>    if (dotPos == -1) {<a name="line.157"></a>
+<span class="sourceLineNo">158</span>      return javaFileName + ".spinfo";<a name="line.158"></a>
+<span class="sourceLineNo">159</span>    } else {<a name="line.159"></a>
+<span class="sourceLineNo">160</span>      return javaFileName.substring(0, dotPos) + ".spinfo";<a name="line.160"></a>
+<span class="sourceLineNo">161</span>    }<a name="line.161"></a>
+<span class="sourceLineNo">162</span>  }<a name="line.162"></a>
+<span class="sourceLineNo">163</span><a name="line.163"></a>
+<span class="sourceLineNo">164</span>  /**<a name="line.164"></a>
+<span class="sourceLineNo">165</span>   * Write splitters for the Java file to the PrintWriter as a spinfo file.<a name="line.165"></a>
+<span class="sourceLineNo">166</span>   *<a name="line.166"></a>
+<span class="sourceLineNo">167</span>   * @param javaFileName the name of the java file from which this spinfo file is being made<a name="line.167"></a>
+<span class="sourceLineNo">168</span>   * @param output the PrintWriter to which this spinfo file is being wrote<a name="line.168"></a>
+<span class="sourceLineNo">169</span>   */<a name="line.169"></a>
+<span class="sourceLineNo">170</span>  private static void writeSplitters(String javaFileName, PrintWriter output) throws IOException {<a name="line.170"></a>
+<span class="sourceLineNo">171</span>    Reader input = Files.newBufferedReader(Paths.get(javaFileName), UTF_8);<a name="line.171"></a>
+<span class="sourceLineNo">172</span>    JavaParser parser = new JavaParser(input);<a name="line.172"></a>
+<span class="sourceLineNo">173</span>    Node root;<a name="line.173"></a>
+<span class="sourceLineNo">174</span>    try {<a name="line.174"></a>
+<span class="sourceLineNo">175</span>      root = parser.CompilationUnit();<a name="line.175"></a>
+<span class="sourceLineNo">176</span>    } catch (ParseException e) {<a name="line.176"></a>
+<span class="sourceLineNo">177</span>      e.printStackTrace();<a name="line.177"></a>
+<span class="sourceLineNo">178</span>      throw new Daikon.UserError("ParseException");<a name="line.178"></a>
+<span class="sourceLineNo">179</span>    }<a name="line.179"></a>
+<span class="sourceLineNo">180</span>    debug.fine("CreateSpinfo: processing file " + javaFileName);<a name="line.180"></a>
+<span class="sourceLineNo">181</span>    ConditionExtractor extractor = new ConditionExtractor();<a name="line.181"></a>
+<span class="sourceLineNo">182</span>    root.accept(extractor);<a name="line.182"></a>
+<span class="sourceLineNo">183</span>    // conditions: method name (String) to conditional expressions (String)<a name="line.183"></a>
+<span class="sourceLineNo">184</span>    Map&lt;String, List&lt;String&gt;&gt; conditions = extractor.getConditionMap();<a name="line.184"></a>
+<span class="sourceLineNo">185</span>    // replaceStatements: method declaration (String) to method body (String)<a name="line.185"></a>
+<span class="sourceLineNo">186</span>    Map&lt;String, String&gt; replaceStatements = extractor.getReplaceStatements();<a name="line.186"></a>
+<span class="sourceLineNo">187</span>    String packageName = extractor.getPackageName();<a name="line.187"></a>
+<span class="sourceLineNo">188</span>    filterConditions(conditions);<a name="line.188"></a>
+<span class="sourceLineNo">189</span>    addOrigConditions(conditions);<a name="line.189"></a>
+<span class="sourceLineNo">190</span>    printSpinfoFile(output, conditions, replaceStatements, packageName);<a name="line.190"></a>
+<span class="sourceLineNo">191</span>  }<a name="line.191"></a>
+<span class="sourceLineNo">192</span><a name="line.192"></a>
+<span class="sourceLineNo">193</span>  /** Remove redundant and trivial conditions from conditionMap. Side-effects conditionMap. */<a name="line.193"></a>
+<span class="sourceLineNo">194</span>  private static void filterConditions(Map&lt;String, List&lt;String&gt;&gt; conditionMap) {<a name="line.194"></a>
+<span class="sourceLineNo">195</span>    for (Map.Entry&lt;String, List&lt;String&gt;&gt; entry : conditionMap.entrySet()) {<a name="line.195"></a>
+<span class="sourceLineNo">196</span>      List&lt;String&gt; conditions = entry.getValue();<a name="line.196"></a>
+<span class="sourceLineNo">197</span>      conditions = CollectionsPlume.removeDuplicates(conditions);<a name="line.197"></a>
+<span class="sourceLineNo">198</span>      conditions.remove("true");<a name="line.198"></a>
+<span class="sourceLineNo">199</span>      conditions.remove("false");<a name="line.199"></a>
+<span class="sourceLineNo">200</span>      entry.setValue(conditions);<a name="line.200"></a>
+<span class="sourceLineNo">201</span>    }<a name="line.201"></a>
+<span class="sourceLineNo">202</span>  }<a name="line.202"></a>
+<span class="sourceLineNo">203</span><a name="line.203"></a>
+<span class="sourceLineNo">204</span>  /**<a name="line.204"></a>
+<span class="sourceLineNo">205</span>   * For each condition in conditionMap, an additional condition is added which is identical to the<a name="line.205"></a>
+<span class="sourceLineNo">206</span>   * initial condition with the exception that it is prefixed with "orig(" and suffixed with ")".<a name="line.206"></a>
+<span class="sourceLineNo">207</span>   */<a name="line.207"></a>
+<span class="sourceLineNo">208</span>  private static void addOrigConditions(Map&lt;String, List&lt;String&gt;&gt; conditionMap) {<a name="line.208"></a>
+<span class="sourceLineNo">209</span>    for (List&lt;String&gt; conditions : conditionMap.values()) {<a name="line.209"></a>
+<span class="sourceLineNo">210</span>      int size = conditions.size();<a name="line.210"></a>
+<span class="sourceLineNo">211</span>      for (int i = 0; i &lt; size; i++) {<a name="line.211"></a>
+<span class="sourceLineNo">212</span>        conditions.add(addOrig(conditions.get(i)));<a name="line.212"></a>
+<span class="sourceLineNo">213</span>      }<a name="line.213"></a>
+<span class="sourceLineNo">214</span>    }<a name="line.214"></a>
+<span class="sourceLineNo">215</span>  }<a name="line.215"></a>
+<span class="sourceLineNo">216</span><a name="line.216"></a>
+<span class="sourceLineNo">217</span>  /** Returns condition prefixed with "orig(" and suffixed with ")". */<a name="line.217"></a>
+<span class="sourceLineNo">218</span>  private static String addOrig(String condition) {<a name="line.218"></a>
+<span class="sourceLineNo">219</span>    return "orig(" + condition + ")";<a name="line.219"></a>
+<span class="sourceLineNo">220</span>  }<a name="line.220"></a>
+<span class="sourceLineNo">221</span><a name="line.221"></a>
+<span class="sourceLineNo">222</span>  /**<a name="line.222"></a>
+<span class="sourceLineNo">223</span>   * Writes the spinfo file specified by conditions, replaceStatements, and package name to output.<a name="line.223"></a>
+<span class="sourceLineNo">224</span>   *<a name="line.224"></a>
+<span class="sourceLineNo">225</span>   * @param output the PrintWriter to which the spinfo file is to be written<a name="line.225"></a>
+<span class="sourceLineNo">226</span>   * @param conditions the conditions to be included in the spinfo file. conditions should be a map<a name="line.226"></a>
+<span class="sourceLineNo">227</span>   *     from method names to the conditional expressions for that method to split upon.<a name="line.227"></a>
+<span class="sourceLineNo">228</span>   * @param replaceStatements the replace statements to be included in the spinfo file.<a name="line.228"></a>
+<span class="sourceLineNo">229</span>   *     replaceStatements should be a map from method declarations to method bodies.<a name="line.229"></a>
+<span class="sourceLineNo">230</span>   * @param packageName the package name of the java file for which this spinfo file is being<a name="line.230"></a>
+<span class="sourceLineNo">231</span>   *     written<a name="line.231"></a>
+<span class="sourceLineNo">232</span>   */<a name="line.232"></a>
+<span class="sourceLineNo">233</span>  private static void printSpinfoFile(<a name="line.233"></a>
+<span class="sourceLineNo">234</span>      PrintWriter output,<a name="line.234"></a>
+<span class="sourceLineNo">235</span>      Map&lt;String, List&lt;String&gt;&gt; conditions,<a name="line.235"></a>
+<span class="sourceLineNo">236</span>      Map&lt;String, String&gt; replaceStatements,<a name="line.236"></a>
+<span class="sourceLineNo">237</span>      @Nullable String packageName)<a name="line.237"></a>
+<span class="sourceLineNo">238</span>      throws IOException {<a name="line.238"></a>
+<span class="sourceLineNo">239</span>    if (!replaceStatements.values().isEmpty()) {<a name="line.239"></a>
+<span class="sourceLineNo">240</span>      output.println("REPLACE");<a name="line.240"></a>
+<span class="sourceLineNo">241</span>      for (<a name="line.241"></a>
+<span class="sourceLineNo">242</span>      @KeyFor("replaceStatements") String declaration : CollectionsPlume.sortedKeySet(replaceStatements)) {<a name="line.242"></a>
+<span class="sourceLineNo">243</span>        output.println(declaration);<a name="line.243"></a>
+<span class="sourceLineNo">244</span>        String replacement = replaceStatements.get(declaration);<a name="line.244"></a>
+<span class="sourceLineNo">245</span>        output.println(removeNewlines(replacement));<a name="line.245"></a>
+<span class="sourceLineNo">246</span>      }<a name="line.246"></a>
+<span class="sourceLineNo">247</span>      output.println();<a name="line.247"></a>
+<span class="sourceLineNo">248</span>    }<a name="line.248"></a>
+<span class="sourceLineNo">249</span>    for (@KeyFor("conditions") String method : CollectionsPlume.sortedKeySet(conditions)) {<a name="line.249"></a>
+<span class="sourceLineNo">250</span>      List&lt;String&gt; method_conds = conditions.get(method);<a name="line.250"></a>
+<span class="sourceLineNo">251</span>      Collections.sort(method_conds);<a name="line.251"></a>
+<span class="sourceLineNo">252</span>      if (method_conds.size() &gt; 0) {<a name="line.252"></a>
+<span class="sourceLineNo">253</span>        String qualifiedMethod = (packageName == null) ? method : packageName + "." + method;<a name="line.253"></a>
+<span class="sourceLineNo">254</span>        output.println("PPT_NAME " + qualifiedMethod);<a name="line.254"></a>
+<span class="sourceLineNo">255</span>        for (int i = 0; i &lt; method_conds.size(); i++) {<a name="line.255"></a>
+<span class="sourceLineNo">256</span>          String cond = removeNewlines(method_conds.get(i));<a name="line.256"></a>
+<span class="sourceLineNo">257</span>          if (!(cond.equals("true") || cond.equals("false"))) {<a name="line.257"></a>
+<span class="sourceLineNo">258</span>            output.println(cond);<a name="line.258"></a>
+<span class="sourceLineNo">259</span>          }<a name="line.259"></a>
+<span class="sourceLineNo">260</span>        }<a name="line.260"></a>
+<span class="sourceLineNo">261</span>        output.println();<a name="line.261"></a>
+<span class="sourceLineNo">262</span>      }<a name="line.262"></a>
+<span class="sourceLineNo">263</span>    }<a name="line.263"></a>
+<span class="sourceLineNo">264</span>  }<a name="line.264"></a>
+<span class="sourceLineNo">265</span><a name="line.265"></a>
+<span class="sourceLineNo">266</span>  /**<a name="line.266"></a>
+<span class="sourceLineNo">267</span>   * Returns target with line separators and the whitespace around a line separator replaced by a<a name="line.267"></a>
+<span class="sourceLineNo">268</span>   * single space.<a name="line.268"></a>
+<span class="sourceLineNo">269</span>   */<a name="line.269"></a>
+<span class="sourceLineNo">270</span>  private static String removeNewlines(String target) {<a name="line.270"></a>
+<span class="sourceLineNo">271</span>    String[] lines = UtilPlume.splitLines(target);<a name="line.271"></a>
+<span class="sourceLineNo">272</span>    for (int i = 0; i &lt; lines.length; i++) {<a name="line.272"></a>
+<span class="sourceLineNo">273</span>      lines[i] = lines[i].trim();<a name="line.273"></a>
+<span class="sourceLineNo">274</span>    }<a name="line.274"></a>
+<span class="sourceLineNo">275</span>    return String.join(" ", lines);<a name="line.275"></a>
+<span class="sourceLineNo">276</span>  }<a name="line.276"></a>
+<span class="sourceLineNo">277</span>}<a name="line.277"></a>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</pre>
+</div>
+</body>
+</html>

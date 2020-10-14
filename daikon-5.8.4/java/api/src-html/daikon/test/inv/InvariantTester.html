@@ -1,0 +1,236 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<html lang="en">
+<head><link rel="icon" href="../../../../daikon-favicon.png" type="image/png"/>
+<title>Source code</title>
+<link rel="stylesheet" type="text/css" href="../../../../stylesheet.css" title="Style">
+</head>
+<body>
+<div class="sourceContainer">
+<pre><span class="sourceLineNo">001</span>package daikon.test.inv;<a name="line.1"></a>
+<span class="sourceLineNo">002</span><a name="line.2"></a>
+<span class="sourceLineNo">003</span>import static org.junit.Assert.assertEquals;<a name="line.3"></a>
+<span class="sourceLineNo">004</span>import static org.junit.Assert.assertTrue;<a name="line.4"></a>
+<span class="sourceLineNo">005</span><a name="line.5"></a>
+<span class="sourceLineNo">006</span>import daikon.*;<a name="line.6"></a>
+<span class="sourceLineNo">007</span>import daikon.config.*;<a name="line.7"></a>
+<span class="sourceLineNo">008</span>import daikon.inv.*;<a name="line.8"></a>
+<span class="sourceLineNo">009</span>import daikon.inv.binary.twoScalar.*;<a name="line.9"></a>
+<span class="sourceLineNo">010</span>import daikon.test.*;<a name="line.10"></a>
+<span class="sourceLineNo">011</span>import java.util.Comparator;<a name="line.11"></a>
+<span class="sourceLineNo">012</span>import java.util.Random;<a name="line.12"></a>
+<span class="sourceLineNo">013</span>import junit.framework.*;<a name="line.13"></a>
+<span class="sourceLineNo">014</span>import org.junit.BeforeClass;<a name="line.14"></a>
+<span class="sourceLineNo">015</span>import org.junit.Test;<a name="line.15"></a>
+<span class="sourceLineNo">016</span><a name="line.16"></a>
+<span class="sourceLineNo">017</span>@SuppressWarnings("nullness") // testing code<a name="line.17"></a>
+<span class="sourceLineNo">018</span>public class InvariantTester {<a name="line.18"></a>
+<span class="sourceLineNo">019</span><a name="line.19"></a>
+<span class="sourceLineNo">020</span>  @BeforeClass<a name="line.20"></a>
+<span class="sourceLineNo">021</span>  public static void setUpClass() {<a name="line.21"></a>
+<span class="sourceLineNo">022</span>    daikon.LogHelper.setupLogs(LogHelper.INFO);<a name="line.22"></a>
+<span class="sourceLineNo">023</span>    FileIO.new_decl_format = true;<a name="line.23"></a>
+<span class="sourceLineNo">024</span>  }<a name="line.24"></a>
+<span class="sourceLineNo">025</span><a name="line.25"></a>
+<span class="sourceLineNo">026</span>  @SuppressWarnings("interning")<a name="line.26"></a>
+<span class="sourceLineNo">027</span>  public VarInfo newIntVarInfo(String name) {<a name="line.27"></a>
+<span class="sourceLineNo">028</span>    return new VarInfo(<a name="line.28"></a>
+<span class="sourceLineNo">029</span>        name, ProglangType.INT, ProglangType.INT, VarComparabilityNone.it, VarInfoAux.getDefault());<a name="line.29"></a>
+<span class="sourceLineNo">030</span>  }<a name="line.30"></a>
+<span class="sourceLineNo">031</span><a name="line.31"></a>
+<span class="sourceLineNo">032</span>  @Test<a name="line.32"></a>
+<span class="sourceLineNo">033</span>  public void testClassVarnameComparator() {<a name="line.33"></a>
+<span class="sourceLineNo">034</span>    Comparator&lt;Invariant&gt; c = new Invariant.ClassVarnameComparator();<a name="line.34"></a>
+<span class="sourceLineNo">035</span><a name="line.35"></a>
+<span class="sourceLineNo">036</span>    VarInfo[] vars = {Common.newIntVarInfo("x"), Common.newIntVarInfo("y")};<a name="line.36"></a>
+<span class="sourceLineNo">037</span>    PptTopLevel ppt = Common.makePptTopLevel("Foo:::OBJECT", vars);<a name="line.37"></a>
+<span class="sourceLineNo">038</span>    PptSlice slice = new PptSlice2(ppt, vars);<a name="line.38"></a>
+<span class="sourceLineNo">039</span><a name="line.39"></a>
+<span class="sourceLineNo">040</span>    Invariant inv1, inv2, inv2_2, inv2_3, inv2_4, inv2_5, inv2_6, inv3, inv4, inv5, inv6;<a name="line.40"></a>
+<span class="sourceLineNo">041</span><a name="line.41"></a>
+<span class="sourceLineNo">042</span>    Configuration.getInstance()<a name="line.42"></a>
+<span class="sourceLineNo">043</span>        .apply("daikon.inv.binary.twoScalar.NumericInt.BitwiseComplement.enabled = 1");<a name="line.43"></a>
+<span class="sourceLineNo">044</span><a name="line.44"></a>
+<span class="sourceLineNo">045</span>    inv1 = NumericInt.BitwiseComplement.get_proto().instantiate(slice);<a name="line.45"></a>
+<span class="sourceLineNo">046</span>    assertEquals(0, c.compare(inv1, inv1));<a name="line.46"></a>
+<span class="sourceLineNo">047</span><a name="line.47"></a>
+<span class="sourceLineNo">048</span>    inv2 = IntEqual.get_proto().instantiate(slice);<a name="line.48"></a>
+<span class="sourceLineNo">049</span>    inv2_2 = IntNonEqual.get_proto().instantiate(slice);<a name="line.49"></a>
+<span class="sourceLineNo">050</span>    inv2_3 = IntLessThan.get_proto().instantiate(slice);<a name="line.50"></a>
+<span class="sourceLineNo">051</span>    inv2_4 = IntLessEqual.get_proto().instantiate(slice);<a name="line.51"></a>
+<span class="sourceLineNo">052</span>    inv2_5 = IntGreaterThan.get_proto().instantiate(slice);<a name="line.52"></a>
+<span class="sourceLineNo">053</span>    inv2_6 = IntGreaterEqual.get_proto().instantiate(slice);<a name="line.53"></a>
+<span class="sourceLineNo">054</span>    assertTrue(c.compare(inv1, inv2) &gt; 0);<a name="line.54"></a>
+<span class="sourceLineNo">055</span>    assertTrue(c.compare(inv1, inv2_2) &gt; 0);<a name="line.55"></a>
+<span class="sourceLineNo">056</span>    assertTrue(c.compare(inv1, inv2_3) &gt; 0);<a name="line.56"></a>
+<span class="sourceLineNo">057</span>    assertTrue(c.compare(inv1, inv2_4) &gt; 0);<a name="line.57"></a>
+<span class="sourceLineNo">058</span>    assertTrue(c.compare(inv1, inv2_5) &gt; 0);<a name="line.58"></a>
+<span class="sourceLineNo">059</span>    assertTrue(c.compare(inv1, inv2_6) &gt; 0);<a name="line.59"></a>
+<span class="sourceLineNo">060</span><a name="line.60"></a>
+<span class="sourceLineNo">061</span>    inv3 = LinearBinary.get_proto().instantiate(slice);<a name="line.61"></a>
+<span class="sourceLineNo">062</span>    assertTrue(c.compare(inv3, inv1) &lt; 0);<a name="line.62"></a>
+<span class="sourceLineNo">063</span><a name="line.63"></a>
+<span class="sourceLineNo">064</span>    inv4 = IntNonEqual.get_proto().instantiate(slice);<a name="line.64"></a>
+<span class="sourceLineNo">065</span>    assertTrue(c.compare(inv1, inv4) &gt; 0);<a name="line.65"></a>
+<span class="sourceLineNo">066</span><a name="line.66"></a>
+<span class="sourceLineNo">067</span>    inv5 = Implication.makeImplication(ppt, inv1, inv2, false, inv1, inv2);<a name="line.67"></a>
+<span class="sourceLineNo">068</span>    inv6 = Implication.makeImplication(ppt, inv1, inv3, false, inv1, inv3);<a name="line.68"></a>
+<span class="sourceLineNo">069</span>    assertTrue(c.compare(inv5, inv6) &lt; 0);<a name="line.69"></a>
+<span class="sourceLineNo">070</span><a name="line.70"></a>
+<span class="sourceLineNo">071</span>    inv5 = Implication.makeImplication(ppt, inv2, inv1, false, inv2, inv1);<a name="line.71"></a>
+<span class="sourceLineNo">072</span>    inv6 = Implication.makeImplication(ppt, inv2, inv3, false, inv2, inv3);<a name="line.72"></a>
+<span class="sourceLineNo">073</span>    assertTrue(c.compare(inv5, inv6) &gt; 0);<a name="line.73"></a>
+<span class="sourceLineNo">074</span><a name="line.74"></a>
+<span class="sourceLineNo">075</span>    inv5 = Implication.makeImplication(ppt, inv3, inv2, false, inv3, inv2);<a name="line.75"></a>
+<span class="sourceLineNo">076</span>    inv6 = Implication.makeImplication(ppt, inv3, inv1, false, inv3, inv1);<a name="line.76"></a>
+<span class="sourceLineNo">077</span>    assertTrue(c.compare(inv5, inv6) &lt; 0);<a name="line.77"></a>
+<span class="sourceLineNo">078</span><a name="line.78"></a>
+<span class="sourceLineNo">079</span>    inv5 = Implication.makeImplication(ppt, inv1, inv4, false, inv1, inv4);<a name="line.79"></a>
+<span class="sourceLineNo">080</span>    inv6 = Implication.makeImplication(ppt, inv3, inv4, false, inv3, inv4);<a name="line.80"></a>
+<span class="sourceLineNo">081</span>    assertTrue(c.compare(inv5, inv6) &gt; 0);<a name="line.81"></a>
+<span class="sourceLineNo">082</span><a name="line.82"></a>
+<span class="sourceLineNo">083</span>    inv5 = Implication.makeImplication(ppt, inv2, inv4, false, inv2, inv4);<a name="line.83"></a>
+<span class="sourceLineNo">084</span>    inv6 = Implication.makeImplication(ppt, inv4, inv1, false, inv4, inv1);<a name="line.84"></a>
+<span class="sourceLineNo">085</span>    assertTrue(c.compare(inv5, inv6) &lt; 0);<a name="line.85"></a>
+<span class="sourceLineNo">086</span><a name="line.86"></a>
+<span class="sourceLineNo">087</span>    VarInfo[] vars2 = {Common.newIntVarInfo("x"), Common.newIntVarInfo("z")};<a name="line.87"></a>
+<span class="sourceLineNo">088</span>    PptTopLevel ppt2 = Common.makePptTopLevel("Foo:::OBJECT", vars2);<a name="line.88"></a>
+<span class="sourceLineNo">089</span>    PptSlice slice2 = new PptSlice2(ppt2, vars2);<a name="line.89"></a>
+<span class="sourceLineNo">090</span>    inv2 = NumericInt.BitwiseComplement.get_proto().instantiate(slice2);<a name="line.90"></a>
+<span class="sourceLineNo">091</span>    assertTrue(c.compare(inv1, inv2) &lt; 0);<a name="line.91"></a>
+<span class="sourceLineNo">092</span><a name="line.92"></a>
+<span class="sourceLineNo">093</span>    vars2[0] = Common.newIntVarInfo("a");<a name="line.93"></a>
+<span class="sourceLineNo">094</span>    vars2[1] = Common.newIntVarInfo("y");<a name="line.94"></a>
+<span class="sourceLineNo">095</span>    ppt2 = Common.makePptTopLevel("Foo:::OBJECT", vars2);<a name="line.95"></a>
+<span class="sourceLineNo">096</span>    slice2 = new PptSlice2(ppt2, vars2);<a name="line.96"></a>
+<span class="sourceLineNo">097</span>    inv2 = NumericInt.BitwiseComplement.get_proto().instantiate(slice2);<a name="line.97"></a>
+<span class="sourceLineNo">098</span>    assertTrue(c.compare(inv1, inv2) &gt; 0);<a name="line.98"></a>
+<span class="sourceLineNo">099</span>  }<a name="line.99"></a>
+<span class="sourceLineNo">100</span><a name="line.100"></a>
+<span class="sourceLineNo">101</span>  @Test<a name="line.101"></a>
+<span class="sourceLineNo">102</span>  public void test_prob_is_ge() {<a name="line.102"></a>
+<span class="sourceLineNo">103</span>    assertEquals(1.0, Invariant.prob_is_ge(0, 11), 0);<a name="line.103"></a>
+<span class="sourceLineNo">104</span>    assertEquals(1.0, Invariant.prob_is_ge(1, 11), 0);<a name="line.104"></a>
+<span class="sourceLineNo">105</span>    assertEquals(.9, Invariant.prob_is_ge(2, 11), 0);<a name="line.105"></a>
+<span class="sourceLineNo">106</span>    assertEquals(.8, Invariant.prob_is_ge(3, 11), 0);<a name="line.106"></a>
+<span class="sourceLineNo">107</span>    assertEquals(.2, Invariant.prob_is_ge(9, 11), 0);<a name="line.107"></a>
+<span class="sourceLineNo">108</span>    assertEquals(.1, Invariant.prob_is_ge(10, 11), 0);<a name="line.108"></a>
+<span class="sourceLineNo">109</span>    assertEquals(0.0, Invariant.prob_is_ge(11, 11), 0);<a name="line.109"></a>
+<span class="sourceLineNo">110</span>    assertEquals(0.0, Invariant.prob_is_ge(20, 11), 0);<a name="line.110"></a>
+<span class="sourceLineNo">111</span>  }<a name="line.111"></a>
+<span class="sourceLineNo">112</span><a name="line.112"></a>
+<span class="sourceLineNo">113</span>  @Test<a name="line.113"></a>
+<span class="sourceLineNo">114</span>  public void test_prob_and() {<a name="line.114"></a>
+<span class="sourceLineNo">115</span><a name="line.115"></a>
+<span class="sourceLineNo">116</span>    assertEquals(0.0, Invariant.prob_and(0, 0), 0);<a name="line.116"></a>
+<span class="sourceLineNo">117</span>    assertEquals(1.0, Invariant.prob_and(0, 1), 0);<a name="line.117"></a>
+<span class="sourceLineNo">118</span>    assertEquals(1.0, Invariant.prob_and(1, 0), 0);<a name="line.118"></a>
+<span class="sourceLineNo">119</span>    assertEquals(1.0, Invariant.prob_and(1, 1), 0);<a name="line.119"></a>
+<span class="sourceLineNo">120</span>    assertEquals(.5, Invariant.prob_and(0, .5), 0);<a name="line.120"></a>
+<span class="sourceLineNo">121</span>    assertEquals(.5, Invariant.prob_and(.5, 0), 0);<a name="line.121"></a>
+<span class="sourceLineNo">122</span>    assertEquals(1.0, Invariant.prob_and(1, .5), 0);<a name="line.122"></a>
+<span class="sourceLineNo">123</span>    assertEquals(1.0, Invariant.prob_and(.5, 1), 0);<a name="line.123"></a>
+<span class="sourceLineNo">124</span>    assertEquals(.1, Invariant.prob_and(0, .1), 0);<a name="line.124"></a>
+<span class="sourceLineNo">125</span>    assertEquals(.1, Invariant.prob_and(.1, 0), 0);<a name="line.125"></a>
+<span class="sourceLineNo">126</span>    assertEquals(1.0, Invariant.prob_and(1, .1), 0);<a name="line.126"></a>
+<span class="sourceLineNo">127</span>    assertEquals(1.0, Invariant.prob_and(.1, 1), 0);<a name="line.127"></a>
+<span class="sourceLineNo">128</span>    assertEquals(.75, Invariant.prob_and(.5, .5), 0);<a name="line.128"></a>
+<span class="sourceLineNo">129</span>    assertEquals(.91, Invariant.prob_and(.1, .9), 0);<a name="line.129"></a>
+<span class="sourceLineNo">130</span>    assertEquals(.91, Invariant.prob_and(.9, .1), 0);<a name="line.130"></a>
+<span class="sourceLineNo">131</span><a name="line.131"></a>
+<span class="sourceLineNo">132</span>    Random r = new Random(20010907);<a name="line.132"></a>
+<span class="sourceLineNo">133</span>    for (int i = 0; i &lt; 100; i++) {<a name="line.133"></a>
+<span class="sourceLineNo">134</span>      double x = r.nextDouble();<a name="line.134"></a>
+<span class="sourceLineNo">135</span>      double y = r.nextDouble();<a name="line.135"></a>
+<span class="sourceLineNo">136</span>      double z = r.nextDouble();<a name="line.136"></a>
+<span class="sourceLineNo">137</span>      double r1 = Invariant.prob_and(x, y, z);<a name="line.137"></a>
+<span class="sourceLineNo">138</span>      double r2 = Invariant.prob_and(x, Invariant.prob_and(y, z));<a name="line.138"></a>
+<span class="sourceLineNo">139</span>      double r3 = Invariant.prob_and(Invariant.prob_and(x, y), z);<a name="line.139"></a>
+<span class="sourceLineNo">140</span>      assertEquals(r1, r2, .000001);<a name="line.140"></a>
+<span class="sourceLineNo">141</span>      assertEquals(r1, r3, .000001);<a name="line.141"></a>
+<span class="sourceLineNo">142</span>      assertEquals(r2, r3, .000001);<a name="line.142"></a>
+<span class="sourceLineNo">143</span>    }<a name="line.143"></a>
+<span class="sourceLineNo">144</span>  }<a name="line.144"></a>
+<span class="sourceLineNo">145</span><a name="line.145"></a>
+<span class="sourceLineNo">146</span>  @Test<a name="line.146"></a>
+<span class="sourceLineNo">147</span>  public void test_prob_or() {<a name="line.147"></a>
+<span class="sourceLineNo">148</span>    assertEquals(0.0, Invariant.prob_or(0, 0), 0);<a name="line.148"></a>
+<span class="sourceLineNo">149</span>    assertEquals(0.0, Invariant.prob_or(0, 1), 0);<a name="line.149"></a>
+<span class="sourceLineNo">150</span>    assertEquals(0.0, Invariant.prob_or(1, 0), 0);<a name="line.150"></a>
+<span class="sourceLineNo">151</span>    assertEquals(1.0, Invariant.prob_or(1, 1), 0);<a name="line.151"></a>
+<span class="sourceLineNo">152</span>    assertEquals(0.0, Invariant.prob_or(0, .5), 0);<a name="line.152"></a>
+<span class="sourceLineNo">153</span>    assertEquals(0.0, Invariant.prob_or(.5, 0), 0);<a name="line.153"></a>
+<span class="sourceLineNo">154</span>    assertEquals(.5, Invariant.prob_or(1, .5), 0);<a name="line.154"></a>
+<span class="sourceLineNo">155</span>    assertEquals(.5, Invariant.prob_or(.5, 1), 0);<a name="line.155"></a>
+<span class="sourceLineNo">156</span>    assertEquals(0.0, Invariant.prob_or(0, .1), 0);<a name="line.156"></a>
+<span class="sourceLineNo">157</span>    assertEquals(0.0, Invariant.prob_or(.1, 0), 0);<a name="line.157"></a>
+<span class="sourceLineNo">158</span>    assertEquals(.1, Invariant.prob_or(1, .1), 0);<a name="line.158"></a>
+<span class="sourceLineNo">159</span>    assertEquals(.1, Invariant.prob_or(.1, 1), 0);<a name="line.159"></a>
+<span class="sourceLineNo">160</span>    assertEquals(.5, Invariant.prob_or(.5, .5), 0);<a name="line.160"></a>
+<span class="sourceLineNo">161</span>    assertEquals(.1, Invariant.prob_or(.1, .9), 0);<a name="line.161"></a>
+<span class="sourceLineNo">162</span>    assertEquals(.1, Invariant.prob_or(.9, .1), 0);<a name="line.162"></a>
+<span class="sourceLineNo">163</span>  }<a name="line.163"></a>
+<span class="sourceLineNo">164</span>}<a name="line.164"></a>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</pre>
+</div>
+</body>
+</html>

@@ -1,0 +1,223 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<html lang="en">
+<head><link rel="icon" href="../../../daikon-favicon.png" type="image/png"/>
+<title>Source code</title>
+<link rel="stylesheet" type="text/css" href="../../../stylesheet.css" title="Style">
+</head>
+<body>
+<div class="sourceContainer">
+<pre><span class="sourceLineNo">001</span>package daikon.diff;<a name="line.1"></a>
+<span class="sourceLineNo">002</span><a name="line.2"></a>
+<span class="sourceLineNo">003</span>import daikon.FileIO;<a name="line.3"></a>
+<span class="sourceLineNo">004</span>import daikon.Global;<a name="line.4"></a>
+<span class="sourceLineNo">005</span>import daikon.PptTopLevel;<a name="line.5"></a>
+<span class="sourceLineNo">006</span>import daikon.inv.Invariant;<a name="line.6"></a>
+<span class="sourceLineNo">007</span>import java.io.IOException;<a name="line.7"></a>
+<span class="sourceLineNo">008</span>import java.io.ObjectInputStream;<a name="line.8"></a>
+<span class="sourceLineNo">009</span>import java.io.ObjectOutputStream;<a name="line.9"></a>
+<span class="sourceLineNo">010</span>import java.io.Serializable;<a name="line.10"></a>
+<span class="sourceLineNo">011</span>import java.util.ArrayList;<a name="line.11"></a>
+<span class="sourceLineNo">012</span>import java.util.Collections;<a name="line.12"></a>
+<span class="sourceLineNo">013</span>import java.util.Comparator;<a name="line.13"></a>
+<span class="sourceLineNo">014</span>import java.util.HashMap;<a name="line.14"></a>
+<span class="sourceLineNo">015</span>import java.util.Iterator;<a name="line.15"></a>
+<span class="sourceLineNo">016</span>import java.util.List;<a name="line.16"></a>
+<span class="sourceLineNo">017</span>import java.util.Map;<a name="line.17"></a>
+<span class="sourceLineNo">018</span>import org.checkerframework.checker.lock.qual.GuardSatisfied;<a name="line.18"></a>
+<span class="sourceLineNo">019</span>import org.checkerframework.checker.nullness.qual.EnsuresNonNull;<a name="line.19"></a>
+<span class="sourceLineNo">020</span>import org.checkerframework.checker.nullness.qual.RequiresNonNull;<a name="line.20"></a>
+<span class="sourceLineNo">021</span>import org.checkerframework.dataflow.qual.Pure;<a name="line.21"></a>
+<span class="sourceLineNo">022</span>import org.checkerframework.dataflow.qual.SideEffectFree;<a name="line.22"></a>
+<span class="sourceLineNo">023</span>import org.plumelib.util.CollectionsPlume;<a name="line.23"></a>
+<span class="sourceLineNo">024</span><a name="line.24"></a>
+<span class="sourceLineNo">025</span>/**<a name="line.25"></a>
+<span class="sourceLineNo">026</span> * Maps ppts to lists of invariants. Has an iterator to return the ppts in the order they were<a name="line.26"></a>
+<span class="sourceLineNo">027</span> * inserted.<a name="line.27"></a>
+<span class="sourceLineNo">028</span> *<a name="line.28"></a>
+<span class="sourceLineNo">029</span> * &lt;p&gt;The ppts are used only as keys in this data structure. Do not attempt to look up invariants<a name="line.29"></a>
+<span class="sourceLineNo">030</span> * stored in the ppts; instead, obtain invariants via the get() method.<a name="line.30"></a>
+<span class="sourceLineNo">031</span> */<a name="line.31"></a>
+<span class="sourceLineNo">032</span>public class InvMap implements Serializable {<a name="line.32"></a>
+<span class="sourceLineNo">033</span>  // We are Serializable, so we specify a version to allow changes to<a name="line.33"></a>
+<span class="sourceLineNo">034</span>  // method signatures without breaking serialization.  If you add or<a name="line.34"></a>
+<span class="sourceLineNo">035</span>  // remove fields, you should change this number to the current date.<a name="line.35"></a>
+<span class="sourceLineNo">036</span>  static final long serialVersionUID = 20090612L;<a name="line.36"></a>
+<span class="sourceLineNo">037</span><a name="line.37"></a>
+<span class="sourceLineNo">038</span>  private Map&lt;PptTopLevel, List&lt;Invariant&gt;&gt; pptToInvs = new HashMap&lt;&gt;();<a name="line.38"></a>
+<span class="sourceLineNo">039</span>  // The purpose of this field is apparently to permit the ppts to be<a name="line.39"></a>
+<span class="sourceLineNo">040</span>  // extracted in the same order in which they were inserted.<a name="line.40"></a>
+<span class="sourceLineNo">041</span>  // Why not use a LinkedHashMap?  Maybe because it was only added in JDK 1.4.<a name="line.41"></a>
+<span class="sourceLineNo">042</span>  private List&lt;PptTopLevel&gt; ppts = new ArrayList&lt;&gt;();<a name="line.42"></a>
+<span class="sourceLineNo">043</span><a name="line.43"></a>
+<span class="sourceLineNo">044</span>  public InvMap() {}<a name="line.44"></a>
+<span class="sourceLineNo">045</span><a name="line.45"></a>
+<span class="sourceLineNo">046</span>  public void addPpt(PptTopLevel ppt) {<a name="line.46"></a>
+<span class="sourceLineNo">047</span>    put(ppt, new ArrayList&lt;Invariant&gt;());<a name="line.47"></a>
+<span class="sourceLineNo">048</span>  }<a name="line.48"></a>
+<span class="sourceLineNo">049</span><a name="line.49"></a>
+<span class="sourceLineNo">050</span>  public void put(PptTopLevel ppt, List&lt;Invariant&gt; invs) {<a name="line.50"></a>
+<span class="sourceLineNo">051</span>    if (ppts.contains(ppt)) {<a name="line.51"></a>
+<span class="sourceLineNo">052</span>      throw new Error("Tried to add duplicate PptTopLevel " + ppt.name());<a name="line.52"></a>
+<span class="sourceLineNo">053</span>    }<a name="line.53"></a>
+<span class="sourceLineNo">054</span>    ppts.add(ppt);<a name="line.54"></a>
+<span class="sourceLineNo">055</span>    pptToInvs.put(ppt, invs);<a name="line.55"></a>
+<span class="sourceLineNo">056</span>  }<a name="line.56"></a>
+<span class="sourceLineNo">057</span><a name="line.57"></a>
+<span class="sourceLineNo">058</span>  public void add(PptTopLevel ppt, Invariant inv) {<a name="line.58"></a>
+<span class="sourceLineNo">059</span>    if (!ppts.contains(ppt)) {<a name="line.59"></a>
+<span class="sourceLineNo">060</span>      throw new Error("ppt has not yet been added: " + ppt.name());<a name="line.60"></a>
+<span class="sourceLineNo">061</span>    }<a name="line.61"></a>
+<span class="sourceLineNo">062</span>    get(ppt).add(inv);<a name="line.62"></a>
+<span class="sourceLineNo">063</span>  }<a name="line.63"></a>
+<span class="sourceLineNo">064</span><a name="line.64"></a>
+<span class="sourceLineNo">065</span>  public List&lt;Invariant&gt; get(@GuardSatisfied InvMap this, PptTopLevel ppt) {<a name="line.65"></a>
+<span class="sourceLineNo">066</span>    if (!pptToInvs.containsKey(ppt)) {<a name="line.66"></a>
+<span class="sourceLineNo">067</span>      throw new Error("ppt has not yet been added: " + ppt.name());<a name="line.67"></a>
+<span class="sourceLineNo">068</span>    }<a name="line.68"></a>
+<span class="sourceLineNo">069</span>    return pptToInvs.get(ppt);<a name="line.69"></a>
+<span class="sourceLineNo">070</span>  }<a name="line.70"></a>
+<span class="sourceLineNo">071</span><a name="line.71"></a>
+<span class="sourceLineNo">072</span>  /**<a name="line.72"></a>
+<span class="sourceLineNo">073</span>   * Returns an iterator over the ppts, in the order they were added to the map. Each element is a<a name="line.73"></a>
+<span class="sourceLineNo">074</span>   * PptTopLevel. These ppts are only used as keys: do not look in these Ppts to find the invariants<a name="line.74"></a>
+<span class="sourceLineNo">075</span>   * associated with them in the InvMap! Use invariantIterator instead.<a name="line.75"></a>
+<span class="sourceLineNo">076</span>   *<a name="line.76"></a>
+<span class="sourceLineNo">077</span>   * @see #invariantIterator()<a name="line.77"></a>
+<span class="sourceLineNo">078</span>   */<a name="line.78"></a>
+<span class="sourceLineNo">079</span>  public Iterator&lt;PptTopLevel&gt; pptIterator(@GuardSatisfied InvMap this) {<a name="line.79"></a>
+<span class="sourceLineNo">080</span>    return ppts.iterator();<a name="line.80"></a>
+<span class="sourceLineNo">081</span>  }<a name="line.81"></a>
+<span class="sourceLineNo">082</span><a name="line.82"></a>
+<span class="sourceLineNo">083</span>  /**<a name="line.83"></a>
+<span class="sourceLineNo">084</span>   * Returns an iterable over the ppts, in the order they were added to the map. Each element is a<a name="line.84"></a>
+<span class="sourceLineNo">085</span>   * PptTopLevel. These ppts are only used as keys: do not look in these Ppts to find the invariants<a name="line.85"></a>
+<span class="sourceLineNo">086</span>   * associated with them in the InvMap! Use invariantIterator instead.<a name="line.86"></a>
+<span class="sourceLineNo">087</span>   *<a name="line.87"></a>
+<span class="sourceLineNo">088</span>   * @see #invariantIterator()<a name="line.88"></a>
+<span class="sourceLineNo">089</span>   */<a name="line.89"></a>
+<span class="sourceLineNo">090</span>  public Iterable&lt;PptTopLevel&gt; pptIterable(@GuardSatisfied InvMap this) {<a name="line.90"></a>
+<span class="sourceLineNo">091</span>    return CollectionsPlume.iteratorToIterable(pptIterator());<a name="line.91"></a>
+<span class="sourceLineNo">092</span>  }<a name="line.92"></a>
+<span class="sourceLineNo">093</span><a name="line.93"></a>
+<span class="sourceLineNo">094</span>  // Returns a sorted iterator over the Ppts using c as the comparator<a name="line.94"></a>
+<span class="sourceLineNo">095</span>  public Iterator&lt;PptTopLevel&gt; pptSortedIterator(Comparator&lt;PptTopLevel&gt; c) {<a name="line.95"></a>
+<span class="sourceLineNo">096</span>    List&lt;PptTopLevel&gt; ppts_copy = new ArrayList&lt;&gt;(ppts);<a name="line.96"></a>
+<span class="sourceLineNo">097</span>    Collections.sort(ppts_copy, c);<a name="line.97"></a>
+<span class="sourceLineNo">098</span>    return ppts_copy.iterator();<a name="line.98"></a>
+<span class="sourceLineNo">099</span>  }<a name="line.99"></a>
+<span class="sourceLineNo">100</span><a name="line.100"></a>
+<span class="sourceLineNo">101</span>  /** Returns an iterator over the invariants in this. */<a name="line.101"></a>
+<span class="sourceLineNo">102</span>  // The ppts are in the order added, and the invariants are in the order<a name="line.102"></a>
+<span class="sourceLineNo">103</span>  // added within each ppt, but the order of all invariants is not<a name="line.103"></a>
+<span class="sourceLineNo">104</span>  // necessarily that in which they were added, depending on calling<a name="line.104"></a>
+<span class="sourceLineNo">105</span>  // sequences.<a name="line.105"></a>
+<span class="sourceLineNo">106</span>  public Iterator&lt;Invariant&gt; invariantIterator() {<a name="line.106"></a>
+<span class="sourceLineNo">107</span>    ArrayList&lt;Invariant&gt; answer = new ArrayList&lt;&gt;();<a name="line.107"></a>
+<span class="sourceLineNo">108</span>    for (PptTopLevel ppt : ppts) {<a name="line.108"></a>
+<span class="sourceLineNo">109</span>      answer.addAll(get(ppt));<a name="line.109"></a>
+<span class="sourceLineNo">110</span>    }<a name="line.110"></a>
+<span class="sourceLineNo">111</span>    return answer.iterator();<a name="line.111"></a>
+<span class="sourceLineNo">112</span>  }<a name="line.112"></a>
+<span class="sourceLineNo">113</span><a name="line.113"></a>
+<span class="sourceLineNo">114</span>  @SideEffectFree<a name="line.114"></a>
+<span class="sourceLineNo">115</span>  @Override<a name="line.115"></a>
+<span class="sourceLineNo">116</span>  public String toString(@GuardSatisfied InvMap this) {<a name="line.116"></a>
+<span class="sourceLineNo">117</span>    String result = "";<a name="line.117"></a>
+<span class="sourceLineNo">118</span>    for (PptTopLevel ppt : pptIterable()) {<a name="line.118"></a>
+<span class="sourceLineNo">119</span>      result += ppt.name() + Global.lineSep;<a name="line.119"></a>
+<span class="sourceLineNo">120</span>      List&lt;Invariant&gt; invs = get(ppt);<a name="line.120"></a>
+<span class="sourceLineNo">121</span>      for (Invariant inv : invs) {<a name="line.121"></a>
+<span class="sourceLineNo">122</span>        result += "  " + inv.format() + Global.lineSep;<a name="line.122"></a>
+<span class="sourceLineNo">123</span>      }<a name="line.123"></a>
+<span class="sourceLineNo">124</span>    }<a name="line.124"></a>
+<span class="sourceLineNo">125</span>    return result;<a name="line.125"></a>
+<span class="sourceLineNo">126</span>  }<a name="line.126"></a>
+<span class="sourceLineNo">127</span><a name="line.127"></a>
+<span class="sourceLineNo">128</span>  @Pure<a name="line.128"></a>
+<span class="sourceLineNo">129</span>  public int size() {<a name="line.129"></a>
+<span class="sourceLineNo">130</span>    int size1 = ppts.size();<a name="line.130"></a>
+<span class="sourceLineNo">131</span>    int size2 = pptToInvs.size();<a name="line.131"></a>
+<span class="sourceLineNo">132</span>    assert size1 == size2;<a name="line.132"></a>
+<span class="sourceLineNo">133</span>    return size1;<a name="line.133"></a>
+<span class="sourceLineNo">134</span>  }<a name="line.134"></a>
+<span class="sourceLineNo">135</span><a name="line.135"></a>
+<span class="sourceLineNo">136</span>  /** Include FileIO.new_decl_format in the stream */<a name="line.136"></a>
+<span class="sourceLineNo">137</span>  @RequiresNonNull("FileIO.new_decl_format")<a name="line.137"></a>
+<span class="sourceLineNo">138</span>  private void writeObject(ObjectOutputStream oos) throws IOException {<a name="line.138"></a>
+<span class="sourceLineNo">139</span>    oos.defaultWriteObject();<a name="line.139"></a>
+<span class="sourceLineNo">140</span>    oos.writeObject(FileIO.new_decl_format);<a name="line.140"></a>
+<span class="sourceLineNo">141</span>  }<a name="line.141"></a>
+<span class="sourceLineNo">142</span><a name="line.142"></a>
+<span class="sourceLineNo">143</span>  /** Serialize pptmap and FileIO.new_decl_format */<a name="line.143"></a>
+<span class="sourceLineNo">144</span>  @EnsuresNonNull("FileIO.new_decl_format")<a name="line.144"></a>
+<span class="sourceLineNo">145</span>  private void readObject(ObjectInputStream ois) throws ClassNotFoundException, IOException {<a name="line.145"></a>
+<span class="sourceLineNo">146</span>    ois.defaultReadObject();<a name="line.146"></a>
+<span class="sourceLineNo">147</span>    FileIO.new_decl_format = (Boolean) ois.readObject();<a name="line.147"></a>
+<span class="sourceLineNo">148</span>    // System.out.printf("Restoring new_decl_format to %b%n",<a name="line.148"></a>
+<span class="sourceLineNo">149</span>    //                   FileIO.new_decl_format);<a name="line.149"></a>
+<span class="sourceLineNo">150</span>  }<a name="line.150"></a>
+<span class="sourceLineNo">151</span>}<a name="line.151"></a>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</pre>
+</div>
+</body>
+</html>

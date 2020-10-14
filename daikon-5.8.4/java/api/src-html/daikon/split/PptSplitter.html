@@ -1,0 +1,930 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<html lang="en">
+<head><link rel="icon" href="../../../daikon-favicon.png" type="image/png"/>
+<title>Source code</title>
+<link rel="stylesheet" type="text/css" href="../../../stylesheet.css" title="Style">
+</head>
+<body>
+<div class="sourceContainer">
+<pre><span class="sourceLineNo">001</span>package daikon.split;<a name="line.1"></a>
+<span class="sourceLineNo">002</span><a name="line.2"></a>
+<span class="sourceLineNo">003</span>import static daikon.tools.nullness.NullnessUtil.castNonNullDeep;<a name="line.3"></a>
+<span class="sourceLineNo">004</span><a name="line.4"></a>
+<span class="sourceLineNo">005</span>import daikon.Debug;<a name="line.5"></a>
+<span class="sourceLineNo">006</span>import daikon.DynamicConstants;<a name="line.6"></a>
+<span class="sourceLineNo">007</span>import daikon.PptConditional;<a name="line.7"></a>
+<span class="sourceLineNo">008</span>import daikon.PptRelation;<a name="line.8"></a>
+<span class="sourceLineNo">009</span>import daikon.PptSlice;<a name="line.9"></a>
+<span class="sourceLineNo">010</span>import daikon.PptTopLevel;<a name="line.10"></a>
+<span class="sourceLineNo">011</span>import daikon.ValueTuple;<a name="line.11"></a>
+<span class="sourceLineNo">012</span>import daikon.VarInfo;<a name="line.12"></a>
+<span class="sourceLineNo">013</span>import daikon.inv.DummyInvariant;<a name="line.13"></a>
+<span class="sourceLineNo">014</span>import daikon.inv.Implication;<a name="line.14"></a>
+<span class="sourceLineNo">015</span>import daikon.inv.Invariant;<a name="line.15"></a>
+<span class="sourceLineNo">016</span>import daikon.suppress.NIS;<a name="line.16"></a>
+<span class="sourceLineNo">017</span>import java.io.Serializable;<a name="line.17"></a>
+<span class="sourceLineNo">018</span>import java.util.ArrayList;<a name="line.18"></a>
+<span class="sourceLineNo">019</span>import java.util.Arrays;<a name="line.19"></a>
+<span class="sourceLineNo">020</span>import java.util.Comparator;<a name="line.20"></a>
+<span class="sourceLineNo">021</span>import java.util.Iterator;<a name="line.21"></a>
+<span class="sourceLineNo">022</span>import java.util.LinkedHashMap;<a name="line.22"></a>
+<span class="sourceLineNo">023</span>import java.util.List;<a name="line.23"></a>
+<span class="sourceLineNo">024</span>import java.util.Map;<a name="line.24"></a>
+<span class="sourceLineNo">025</span>import java.util.NavigableSet;<a name="line.25"></a>
+<span class="sourceLineNo">026</span>import java.util.TreeSet;<a name="line.26"></a>
+<span class="sourceLineNo">027</span>import java.util.logging.Level;<a name="line.27"></a>
+<span class="sourceLineNo">028</span>import java.util.logging.Logger;<a name="line.28"></a>
+<span class="sourceLineNo">029</span>import org.checkerframework.checker.interning.qual.UsesObjectEquals;<a name="line.29"></a>
+<span class="sourceLineNo">030</span>import org.checkerframework.checker.lock.qual.GuardSatisfied;<a name="line.30"></a>
+<span class="sourceLineNo">031</span>import org.checkerframework.checker.nullness.qual.KeyFor;<a name="line.31"></a>
+<span class="sourceLineNo">032</span>import org.checkerframework.checker.nullness.qual.NonNull;<a name="line.32"></a>
+<span class="sourceLineNo">033</span>import org.checkerframework.checker.nullness.qual.Nullable;<a name="line.33"></a>
+<span class="sourceLineNo">034</span>import org.checkerframework.checker.nullness.qual.RequiresNonNull;<a name="line.34"></a>
+<span class="sourceLineNo">035</span>import org.checkerframework.dataflow.qual.SideEffectFree;<a name="line.35"></a>
+<span class="sourceLineNo">036</span>import org.plumelib.util.CollectionsPlume;<a name="line.36"></a>
+<span class="sourceLineNo">037</span>import org.plumelib.util.OrderedPairIterator;<a name="line.37"></a>
+<span class="sourceLineNo">038</span>import org.plumelib.util.Pair;<a name="line.38"></a>
+<span class="sourceLineNo">039</span><a name="line.39"></a>
+<span class="sourceLineNo">040</span>/**<a name="line.40"></a>
+<span class="sourceLineNo">041</span> * PptSplitter contains the splitter and its associated PptConditional ppts. Currently all splitters<a name="line.41"></a>
+<span class="sourceLineNo">042</span> * are binary (have exactly two PptConditional ppts) and this is presumed in the implementation.<a name="line.42"></a>
+<span class="sourceLineNo">043</span> * However, this could be extended by extending this class with specific other implementations.<a name="line.43"></a>
+<span class="sourceLineNo">044</span> */<a name="line.44"></a>
+<span class="sourceLineNo">045</span>@UsesObjectEquals<a name="line.45"></a>
+<span class="sourceLineNo">046</span>public class PptSplitter implements Serializable {<a name="line.46"></a>
+<span class="sourceLineNo">047</span><a name="line.47"></a>
+<span class="sourceLineNo">048</span>  // We are Serializable, so we specify a version to allow changes to<a name="line.48"></a>
+<span class="sourceLineNo">049</span>  // method signatures without breaking serialization.  If you add or<a name="line.49"></a>
+<span class="sourceLineNo">050</span>  // remove fields, you should change this number to the current date.<a name="line.50"></a>
+<span class="sourceLineNo">051</span>  static final long serialVersionUID = 20031031L;<a name="line.51"></a>
+<span class="sourceLineNo">052</span><a name="line.52"></a>
+<span class="sourceLineNo">053</span>  /**<a name="line.53"></a>
+<span class="sourceLineNo">054</span>   * Boolean. If true, the built-in splitting rules are disabled. The built-in rules look for<a name="line.54"></a>
+<span class="sourceLineNo">055</span>   * implications based on boolean return values and also when there are exactly two exit points<a name="line.55"></a>
+<span class="sourceLineNo">056</span>   * from a method.<a name="line.56"></a>
+<span class="sourceLineNo">057</span>   */<a name="line.57"></a>
+<span class="sourceLineNo">058</span>  public static boolean dkconfig_disable_splitting = false;<a name="line.58"></a>
+<span class="sourceLineNo">059</span><a name="line.59"></a>
+<span class="sourceLineNo">060</span>  /**<a name="line.60"></a>
+<span class="sourceLineNo">061</span>   * Integer. A value of zero indicates that DummyInvariant objects should not be created. A value<a name="line.61"></a>
+<span class="sourceLineNo">062</span>   * of one indicates that dummy invariants should be created only when no suitable condition was<a name="line.62"></a>
+<span class="sourceLineNo">063</span>   * found in the regular output. A value of two indicates that dummy invariants should be created<a name="line.63"></a>
+<span class="sourceLineNo">064</span>   * for each splitting condition.<a name="line.64"></a>
+<span class="sourceLineNo">065</span>   */<a name="line.65"></a>
+<span class="sourceLineNo">066</span>  public static int dkconfig_dummy_invariant_level = 0;<a name="line.66"></a>
+<span class="sourceLineNo">067</span><a name="line.67"></a>
+<span class="sourceLineNo">068</span>  /**<a name="line.68"></a>
+<span class="sourceLineNo">069</span>   * Split bi-implications ("{@code a &lt;==&gt; b}") into two separate implications ("{@code a ==&gt; b}"<a name="line.69"></a>
+<span class="sourceLineNo">070</span>   * and "{@code b ==&gt; a}").<a name="line.70"></a>
+<span class="sourceLineNo">071</span>   */<a name="line.71"></a>
+<span class="sourceLineNo">072</span>  public static boolean dkconfig_split_bi_implications = false;<a name="line.72"></a>
+<span class="sourceLineNo">073</span><a name="line.73"></a>
+<span class="sourceLineNo">074</span>  /**<a name="line.74"></a>
+<span class="sourceLineNo">075</span>   * When true, compilation errors during splitter file generation will not be reported to the user.<a name="line.75"></a>
+<span class="sourceLineNo">076</span>   */<a name="line.76"></a>
+<span class="sourceLineNo">077</span>  public static boolean dkconfig_suppressSplitterErrors = true;<a name="line.77"></a>
+<span class="sourceLineNo">078</span><a name="line.78"></a>
+<span class="sourceLineNo">079</span>  /** General debug tracer. */<a name="line.79"></a>
+<span class="sourceLineNo">080</span>  public static final Logger debug = Logger.getLogger("daikon.split.PptSplitter");<a name="line.80"></a>
+<span class="sourceLineNo">081</span><a name="line.81"></a>
+<span class="sourceLineNo">082</span>  /** PptTopLevel that contains this split. */<a name="line.82"></a>
+<span class="sourceLineNo">083</span>  private PptTopLevel parent;<a name="line.83"></a>
+<span class="sourceLineNo">084</span><a name="line.84"></a>
+<span class="sourceLineNo">085</span>  /**<a name="line.85"></a>
+<span class="sourceLineNo">086</span>   * Splitter that chooses which PptConditional a sample is applied to. May be null if no<a name="line.86"></a>
+<span class="sourceLineNo">087</span>   * computation is required (e.g., splitting over exit points).<a name="line.87"></a>
+<span class="sourceLineNo">088</span>   */<a name="line.88"></a>
+<span class="sourceLineNo">089</span>  public transient @Nullable Splitter splitter;<a name="line.89"></a>
+<span class="sourceLineNo">090</span><a name="line.90"></a>
+<span class="sourceLineNo">091</span>  /**<a name="line.91"></a>
+<span class="sourceLineNo">092</span>   * One PptConditional for each splitter result. ppts[0] is used when the splitter is true, ppts[1]<a name="line.92"></a>
+<span class="sourceLineNo">093</span>   * when the splitter is false. The contents are PptConditional objects if the splitter is valid,<a name="line.93"></a>
+<span class="sourceLineNo">094</span>   * but are PptTopLevel if the PptSplitter represents two exit points (for which no splitter is<a name="line.94"></a>
+<span class="sourceLineNo">095</span>   * required).<a name="line.95"></a>
+<span class="sourceLineNo">096</span>   */<a name="line.96"></a>
+<span class="sourceLineNo">097</span>  public PptTopLevel[] ppts;<a name="line.97"></a>
+<span class="sourceLineNo">098</span><a name="line.98"></a>
+<span class="sourceLineNo">099</span>  private static final Comparator&lt;Invariant&gt; icfp = new Invariant.InvariantComparatorForPrinting();<a name="line.99"></a>
+<span class="sourceLineNo">100</span><a name="line.100"></a>
+<span class="sourceLineNo">101</span>  /**<a name="line.101"></a>
+<span class="sourceLineNo">102</span>   * Create a binary PptSplitter with the specied splitter for the specified PptTopLevel parent. The<a name="line.102"></a>
+<span class="sourceLineNo">103</span>   * parent should be a leaf (i.e., a numbered exit point).<a name="line.103"></a>
+<span class="sourceLineNo">104</span>   */<a name="line.104"></a>
+<span class="sourceLineNo">105</span>  public PptSplitter(PptTopLevel parent, Splitter splitter) {<a name="line.105"></a>
+<span class="sourceLineNo">106</span><a name="line.106"></a>
+<span class="sourceLineNo">107</span>    this.parent = parent;<a name="line.107"></a>
+<span class="sourceLineNo">108</span>    this.splitter = splitter;<a name="line.108"></a>
+<span class="sourceLineNo">109</span>    ppts =<a name="line.109"></a>
+<span class="sourceLineNo">110</span>        new PptTopLevel[] {<a name="line.110"></a>
+<span class="sourceLineNo">111</span>          new PptConditional(parent, splitter, false), new PptConditional(parent, splitter, true)<a name="line.111"></a>
+<span class="sourceLineNo">112</span>        };<a name="line.112"></a>
+<span class="sourceLineNo">113</span><a name="line.113"></a>
+<span class="sourceLineNo">114</span>    if (debug.isLoggable(Level.FINE)) {<a name="line.114"></a>
+<span class="sourceLineNo">115</span>      debug.fine(<a name="line.115"></a>
+<span class="sourceLineNo">116</span>          "PptSplitter("<a name="line.116"></a>
+<span class="sourceLineNo">117</span>              + parent.name()<a name="line.117"></a>
+<span class="sourceLineNo">118</span>              + ", "<a name="line.118"></a>
+<span class="sourceLineNo">119</span>              + splitter.condition()<a name="line.119"></a>
+<span class="sourceLineNo">120</span>              + "): "<a name="line.120"></a>
+<span class="sourceLineNo">121</span>              + parent.var_infos.length<a name="line.121"></a>
+<span class="sourceLineNo">122</span>              + " VarInfos");<a name="line.122"></a>
+<span class="sourceLineNo">123</span>      for (int ii = 0; ii &lt; parent.var_infos.length; ii++) {<a name="line.123"></a>
+<span class="sourceLineNo">124</span>        debug.fine(<a name="line.124"></a>
+<span class="sourceLineNo">125</span>            "  VarInfo #"<a name="line.125"></a>
+<span class="sourceLineNo">126</span>                + ii<a name="line.126"></a>
+<span class="sourceLineNo">127</span>                + ": at parent="<a name="line.127"></a>
+<span class="sourceLineNo">128</span>                + parent.var_infos[ii].name()<a name="line.128"></a>
+<span class="sourceLineNo">129</span>                + " at ppts[0]="<a name="line.129"></a>
+<span class="sourceLineNo">130</span>                + ppts[0].var_infos[ii].name()<a name="line.130"></a>
+<span class="sourceLineNo">131</span>                + " at ppts[1]="<a name="line.131"></a>
+<span class="sourceLineNo">132</span>                + ppts[1].var_infos[ii].name());<a name="line.132"></a>
+<span class="sourceLineNo">133</span>      }<a name="line.133"></a>
+<span class="sourceLineNo">134</span>    }<a name="line.134"></a>
+<span class="sourceLineNo">135</span>  }<a name="line.135"></a>
+<span class="sourceLineNo">136</span><a name="line.136"></a>
+<span class="sourceLineNo">137</span>  /** Creates a PptSplitter over two exit points. No splitter is required. */<a name="line.137"></a>
+<span class="sourceLineNo">138</span>  public PptSplitter(PptTopLevel parent, PptTopLevel exit1, PptTopLevel exit2) {<a name="line.138"></a>
+<span class="sourceLineNo">139</span>    this.parent = parent;<a name="line.139"></a>
+<span class="sourceLineNo">140</span>    this.splitter = null;<a name="line.140"></a>
+<span class="sourceLineNo">141</span>    ppts = new PptTopLevel[] {exit1, exit2};<a name="line.141"></a>
+<span class="sourceLineNo">142</span>  }<a name="line.142"></a>
+<span class="sourceLineNo">143</span><a name="line.143"></a>
+<span class="sourceLineNo">144</span>  /** Returns true if the splitter is valid at this point, false otherwise. */<a name="line.144"></a>
+<span class="sourceLineNo">145</span>  public boolean splitter_valid() {<a name="line.145"></a>
+<span class="sourceLineNo">146</span><a name="line.146"></a>
+<span class="sourceLineNo">147</span>    assert ((PptConditional) ppts[1]).splitter_valid()<a name="line.147"></a>
+<span class="sourceLineNo">148</span>        == ((PptConditional) ppts[0]).splitter_valid();<a name="line.148"></a>
+<span class="sourceLineNo">149</span>    return ((PptConditional) ppts[0]).splitter_valid();<a name="line.149"></a>
+<span class="sourceLineNo">150</span>  }<a name="line.150"></a>
+<span class="sourceLineNo">151</span><a name="line.151"></a>
+<span class="sourceLineNo">152</span>  /** Adds the sample to one of the conditional ppts in the split. */<a name="line.152"></a>
+<span class="sourceLineNo">153</span>  @SuppressWarnings("flowexpr.parse.error") // private field<a name="line.153"></a>
+<span class="sourceLineNo">154</span>  @RequiresNonNull({<a name="line.154"></a>
+<span class="sourceLineNo">155</span>    "NIS.suppressor_map",<a name="line.155"></a>
+<span class="sourceLineNo">156</span>    "NIS.suppressor_map_suppression_count",<a name="line.156"></a>
+<span class="sourceLineNo">157</span>    "NIS.all_suppressions"<a name="line.157"></a>
+<span class="sourceLineNo">158</span>  })<a name="line.158"></a>
+<span class="sourceLineNo">159</span>  public void add_bottom_up(ValueTuple vt, int count) {<a name="line.159"></a>
+<span class="sourceLineNo">160</span><a name="line.160"></a>
+<span class="sourceLineNo">161</span>    // Choose the appropriate conditional point based on the condition result<a name="line.161"></a>
+<span class="sourceLineNo">162</span>    PptConditional ppt_cond = choose_conditional(vt);<a name="line.162"></a>
+<span class="sourceLineNo">163</span>    if (ppt_cond == null) {<a name="line.163"></a>
+<span class="sourceLineNo">164</span>      return;<a name="line.164"></a>
+<span class="sourceLineNo">165</span>    }<a name="line.165"></a>
+<span class="sourceLineNo">166</span><a name="line.166"></a>
+<span class="sourceLineNo">167</span>    /// ??? MDE<a name="line.167"></a>
+<span class="sourceLineNo">168</span>    // If any parent variables were missing out of bounds on this<a name="line.168"></a>
+<span class="sourceLineNo">169</span>    // sample, apply that to this conditional as well.  A more<a name="line.169"></a>
+<span class="sourceLineNo">170</span>    // efficient way to do this would be better.<a name="line.170"></a>
+<span class="sourceLineNo">171</span>    ppt_cond.get_missingOutOfBounds(parent, vt);<a name="line.171"></a>
+<span class="sourceLineNo">172</span><a name="line.172"></a>
+<span class="sourceLineNo">173</span>    // Add the point<a name="line.173"></a>
+<span class="sourceLineNo">174</span>    ppt_cond.add_bottom_up(vt, count);<a name="line.174"></a>
+<span class="sourceLineNo">175</span><a name="line.175"></a>
+<span class="sourceLineNo">176</span>    if (Debug.ppt_match(ppt_cond)) {<a name="line.176"></a>
+<span class="sourceLineNo">177</span>      String related_vars = Debug.related_vars(ppt_cond, vt);<a name="line.177"></a>
+<span class="sourceLineNo">178</span>      debug.fine(<a name="line.178"></a>
+<span class="sourceLineNo">179</span>          "Adding sample to "<a name="line.179"></a>
+<span class="sourceLineNo">180</span>              + ppt_cond<a name="line.180"></a>
+<span class="sourceLineNo">181</span>              + " with "<a name="line.181"></a>
+<span class="sourceLineNo">182</span>              + vt.size()<a name="line.182"></a>
+<span class="sourceLineNo">183</span>              + " vars"<a name="line.183"></a>
+<span class="sourceLineNo">184</span>              + (!related_vars.equals("") ? (" including " + related_vars) : ""));<a name="line.184"></a>
+<span class="sourceLineNo">185</span>    }<a name="line.185"></a>
+<span class="sourceLineNo">186</span>  }<a name="line.186"></a>
+<span class="sourceLineNo">187</span><a name="line.187"></a>
+<span class="sourceLineNo">188</span>  /**<a name="line.188"></a>
+<span class="sourceLineNo">189</span>   * Chooses the correct conditional point based on the values in this sample. Returns null if none<a name="line.189"></a>
+<span class="sourceLineNo">190</span>   * is applicable.<a name="line.190"></a>
+<span class="sourceLineNo">191</span>   */<a name="line.191"></a>
+<span class="sourceLineNo">192</span>  public @Nullable PptConditional choose_conditional(ValueTuple vt) {<a name="line.192"></a>
+<span class="sourceLineNo">193</span><a name="line.193"></a>
+<span class="sourceLineNo">194</span>    // Currently only binary implications are supported<a name="line.194"></a>
+<span class="sourceLineNo">195</span>    assert ppts.length == 2;<a name="line.195"></a>
+<span class="sourceLineNo">196</span><a name="line.196"></a>
+<span class="sourceLineNo">197</span>    boolean splitter_test;<a name="line.197"></a>
+<span class="sourceLineNo">198</span>    try {<a name="line.198"></a>
+<span class="sourceLineNo">199</span>      splitter_test = ((PptConditional) ppts[0]).splitter.test(vt);<a name="line.199"></a>
+<span class="sourceLineNo">200</span>    } catch (Throwable e) {<a name="line.200"></a>
+<span class="sourceLineNo">201</span>      // If an exception is thrown, don't put the data on either side<a name="line.201"></a>
+<span class="sourceLineNo">202</span>      // of the split.<a name="line.202"></a>
+<span class="sourceLineNo">203</span>      if (false) { // need to add a debugging switch<a name="line.203"></a>
+<span class="sourceLineNo">204</span>        System.out.println(<a name="line.204"></a>
+<span class="sourceLineNo">205</span>            "Exception thrown in PptSplitter.choose_conditional() for " + ppts[0].name());<a name="line.205"></a>
+<span class="sourceLineNo">206</span>        System.out.println("Vars = " + Debug.related_vars(ppts[0], vt));<a name="line.206"></a>
+<span class="sourceLineNo">207</span>      }<a name="line.207"></a>
+<span class="sourceLineNo">208</span>      return null;<a name="line.208"></a>
+<span class="sourceLineNo">209</span>    }<a name="line.209"></a>
+<span class="sourceLineNo">210</span><a name="line.210"></a>
+<span class="sourceLineNo">211</span>    // Choose the appropriate conditional point based on the condition result<a name="line.211"></a>
+<span class="sourceLineNo">212</span>    return ((PptConditional) ppts[splitter_test ? 0 : 1]);<a name="line.212"></a>
+<span class="sourceLineNo">213</span>  }<a name="line.213"></a>
+<span class="sourceLineNo">214</span><a name="line.214"></a>
+<span class="sourceLineNo">215</span>  /** Adds implication invariants based on the invariants found on each side of the split. */<a name="line.215"></a>
+<span class="sourceLineNo">216</span>  @SuppressWarnings("flowexpr.parse.error") // private field<a name="line.216"></a>
+<span class="sourceLineNo">217</span>  @RequiresNonNull({"parent.equality_view", "NIS.all_suppressions", "NIS.suppressor_map"})<a name="line.217"></a>
+<span class="sourceLineNo">218</span>  public void add_implications() {<a name="line.218"></a>
+<span class="sourceLineNo">219</span><a name="line.219"></a>
+<span class="sourceLineNo">220</span>    // Currently only binary implications are supported<a name="line.220"></a>
+<span class="sourceLineNo">221</span>    assert ppts.length == 2;<a name="line.221"></a>
+<span class="sourceLineNo">222</span><a name="line.222"></a>
+<span class="sourceLineNo">223</span>    // Create any NIS suppressed invariants in each conditional<a name="line.223"></a>
+<span class="sourceLineNo">224</span>    @SuppressWarnings({"unchecked", "rawtypes"})<a name="line.224"></a>
+<span class="sourceLineNo">225</span>    List&lt;Invariant&gt; suppressed_invs[] =<a name="line.225"></a>
+<span class="sourceLineNo">226</span>        (ArrayList&lt;Invariant&gt;[]) new @Nullable ArrayList[ppts.length];<a name="line.226"></a>
+<span class="sourceLineNo">227</span>    for (int i = 0; i &lt; ppts.length; i++) {<a name="line.227"></a>
+<span class="sourceLineNo">228</span>      suppressed_invs[i] = NIS.create_suppressed_invs(ppts[i]);<a name="line.228"></a>
+<span class="sourceLineNo">229</span>    }<a name="line.229"></a>
+<span class="sourceLineNo">230</span><a name="line.230"></a>
+<span class="sourceLineNo">231</span>    add_implications_pair();<a name="line.231"></a>
+<span class="sourceLineNo">232</span><a name="line.232"></a>
+<span class="sourceLineNo">233</span>    // Remove all of the NIS suppressed invariants that we just created.<a name="line.233"></a>
+<span class="sourceLineNo">234</span>    for (int i = 0; i &lt; ppts.length; i++) {<a name="line.234"></a>
+<span class="sourceLineNo">235</span>      ppts[i].remove_invs(suppressed_invs[i]);<a name="line.235"></a>
+<span class="sourceLineNo">236</span>    }<a name="line.236"></a>
+<span class="sourceLineNo">237</span>  }<a name="line.237"></a>
+<span class="sourceLineNo">238</span><a name="line.238"></a>
+<span class="sourceLineNo">239</span>  /**<a name="line.239"></a>
+<span class="sourceLineNo">240</span>   * Given a pair of conditional program points, form implications from the invariants true at each<a name="line.240"></a>
+<span class="sourceLineNo">241</span>   * one.<a name="line.241"></a>
+<span class="sourceLineNo">242</span>   *<a name="line.242"></a>
+<span class="sourceLineNo">243</span>   * &lt;p&gt;The algorithm first divides the invariants into two groups:<a name="line.243"></a>
+<span class="sourceLineNo">244</span>   *<a name="line.244"></a>
+<span class="sourceLineNo">245</span>   * &lt;ol&gt;<a name="line.245"></a>
+<span class="sourceLineNo">246</span>   *   &lt;li&gt;the "same" invariants: those that are true at both program points.<a name="line.246"></a>
+<span class="sourceLineNo">247</span>   *   &lt;li&gt;the "different" invariants: all other invariants.<a name="line.247"></a>
+<span class="sourceLineNo">248</span>   * &lt;/ol&gt;<a name="line.248"></a>
+<span class="sourceLineNo">249</span>   *<a name="line.249"></a>
+<span class="sourceLineNo">250</span>   * The "exclusive" invariants (a subset of the "different" inviariants) are true at one program<a name="line.250"></a>
+<span class="sourceLineNo">251</span>   * point, and their negation is true at the other program point.<a name="line.251"></a>
+<span class="sourceLineNo">252</span>   *<a name="line.252"></a>
+<span class="sourceLineNo">253</span>   * &lt;p&gt;At the first program point, for each exclusive invariant and each different invariant,<a name="line.253"></a>
+<span class="sourceLineNo">254</span>   * create a conditional of the form "exclusive &amp;hArr; different". Do the same at the second<a name="line.254"></a>
+<span class="sourceLineNo">255</span>   * program point.<a name="line.255"></a>
+<span class="sourceLineNo">256</span>   *<a name="line.256"></a>
+<span class="sourceLineNo">257</span>   * &lt;p&gt;This method is correct only if the two conditional program points fully partition the input<a name="line.257"></a>
+<span class="sourceLineNo">258</span>   * space (their conditions are negations of one another). For instance, suppose there is a<a name="line.258"></a>
+<span class="sourceLineNo">259</span>   * three-way split with the following invariants detected at each:<a name="line.259"></a>
+<span class="sourceLineNo">260</span>   *<a name="line.260"></a>
+<span class="sourceLineNo">261</span>   * &lt;pre&gt;<a name="line.261"></a>
+<span class="sourceLineNo">262</span>   *   {A,B}  {!A,!B}  {A,!B}<a name="line.262"></a>
+<span class="sourceLineNo">263</span>   * &lt;/pre&gt;<a name="line.263"></a>
+<span class="sourceLineNo">264</span>   *<a name="line.264"></a>
+<span class="sourceLineNo">265</span>   * Examining just the first two would suggest that "A &amp;hArr; B" is valid, but in fact that is a<a name="line.265"></a>
+<span class="sourceLineNo">266</span>   * false inference. Note that this situation can occur if the splitting condition uses variables<a name="line.266"></a>
+<span class="sourceLineNo">267</span>   * that can ever be missing. (Or, presumably, if the condition ever cannot be computed.)<a name="line.267"></a>
+<span class="sourceLineNo">268</span>   */<a name="line.268"></a>
+<span class="sourceLineNo">269</span>  @RequiresNonNull("parent.equality_view")<a name="line.269"></a>
+<span class="sourceLineNo">270</span>  private void add_implications_pair() {<a name="line.270"></a>
+<span class="sourceLineNo">271</span><a name="line.271"></a>
+<span class="sourceLineNo">272</span>    for (PptTopLevel pchild : ppts) {<a name="line.272"></a>
+<span class="sourceLineNo">273</span>      // System.out.printf("splitter child = %s%n", pchild.name());<a name="line.273"></a>
+<span class="sourceLineNo">274</span>      if (pchild.equality_view == null) {<a name="line.274"></a>
+<span class="sourceLineNo">275</span>        System.out.printf("this: %s%n", this);<a name="line.275"></a>
+<span class="sourceLineNo">276</span>        System.out.printf("pchild: %s[%s]%n", pchild, System.identityHashCode(pchild));<a name="line.276"></a>
+<span class="sourceLineNo">277</span>        System.out.printf("pchild.children: %s%n", pchild.children);<a name="line.277"></a>
+<span class="sourceLineNo">278</span>        for (PptRelation rel : pchild.children) {<a name="line.278"></a>
+<span class="sourceLineNo">279</span>          System.out.printf("  relation = %s%n", rel);<a name="line.279"></a>
+<span class="sourceLineNo">280</span>        }<a name="line.280"></a>
+<span class="sourceLineNo">281</span>        System.out.printf("parent: %s%n", parent);<a name="line.281"></a>
+<span class="sourceLineNo">282</span>        throw new Error();<a name="line.282"></a>
+<span class="sourceLineNo">283</span>      }<a name="line.283"></a>
+<span class="sourceLineNo">284</span>    }<a name="line.284"></a>
+<span class="sourceLineNo">285</span><a name="line.285"></a>
+<span class="sourceLineNo">286</span>    debug.fine("add_implications_pair: parent = " + parent.name);<a name="line.286"></a>
+<span class="sourceLineNo">287</span><a name="line.287"></a>
+<span class="sourceLineNo">288</span>    // Maps permuted invariants to their original invariants<a name="line.288"></a>
+<span class="sourceLineNo">289</span>    Map&lt;Invariant, Invariant&gt; orig_invs = new LinkedHashMap&lt;&gt;();<a name="line.289"></a>
+<span class="sourceLineNo">290</span><a name="line.290"></a>
+<span class="sourceLineNo">291</span>    List&lt;@KeyFor("orig_invs") Invariant[]&gt; exclusive_invs_vec =<a name="line.291"></a>
+<span class="sourceLineNo">292</span>        new ArrayList&lt;@KeyFor("orig_invs") Invariant[]&gt;();<a name="line.292"></a>
+<span class="sourceLineNo">293</span><a name="line.293"></a>
+<span class="sourceLineNo">294</span>    // Does not contain anything that is in exclusive_invs_vec.<a name="line.294"></a>
+<span class="sourceLineNo">295</span>    // (Those may be added temporarily, but are removed later.)<a name="line.295"></a>
+<span class="sourceLineNo">296</span>    List&lt;@Nullable @KeyFor("orig_invs") Invariant[]&gt; different_invs_vec =<a name="line.296"></a>
+<span class="sourceLineNo">297</span>        new ArrayList&lt;@Nullable @KeyFor("orig_invs") Invariant[]&gt;();<a name="line.297"></a>
+<span class="sourceLineNo">298</span><a name="line.298"></a>
+<span class="sourceLineNo">299</span>    /// ??? MDE<a name="line.299"></a>
+<span class="sourceLineNo">300</span>    // Loop through each possible parent slice<a name="line.300"></a>
+<span class="sourceLineNo">301</span>    List&lt;VarInfo[]&gt; slices = possible_slices();<a name="line.301"></a>
+<span class="sourceLineNo">302</span><a name="line.302"></a>
+<span class="sourceLineNo">303</span>    int num_children = ppts.length;<a name="line.303"></a>
+<span class="sourceLineNo">304</span><a name="line.304"></a>
+<span class="sourceLineNo">305</span>    for (VarInfo[] vis : slices) {<a name="line.305"></a>
+<span class="sourceLineNo">306</span><a name="line.306"></a>
+<span class="sourceLineNo">307</span>      // Each element of invs[i] is an invariant from the i-th child, permuted to<a name="line.307"></a>
+<span class="sourceLineNo">308</span>      // the parent (and with a parent slice as its ppt slot).<a name="line.308"></a>
+<span class="sourceLineNo">309</span>      @SuppressWarnings({"unchecked", "rawtypes"})<a name="line.309"></a>
+<span class="sourceLineNo">310</span>      /*NNC:@MonotonicNonNull*/ List&lt;Invariant&gt; invs[] =<a name="line.310"></a>
+<span class="sourceLineNo">311</span>          (ArrayList&lt;Invariant&gt;[]) new @Nullable ArrayList[num_children];<a name="line.311"></a>
+<span class="sourceLineNo">312</span><a name="line.312"></a>
+<span class="sourceLineNo">313</span>      // find the parent slice<a name="line.313"></a>
+<span class="sourceLineNo">314</span>      PptSlice pslice = parent.get_or_instantiate_slice(vis);<a name="line.314"></a>
+<span class="sourceLineNo">315</span><a name="line.315"></a>
+<span class="sourceLineNo">316</span>      // Daikon.debugProgress.fine ("    slice: " + pslice.name());<a name="line.316"></a>
+<span class="sourceLineNo">317</span><a name="line.317"></a>
+<span class="sourceLineNo">318</span>      // Loop through each child ppt<a name="line.318"></a>
+<span class="sourceLineNo">319</span>      for (int childno = 0; childno &lt; num_children; childno++) {<a name="line.319"></a>
+<span class="sourceLineNo">320</span>        PptTopLevel child_ppt = ppts[childno];<a name="line.320"></a>
+<span class="sourceLineNo">321</span><a name="line.321"></a>
+<span class="sourceLineNo">322</span>        assert child_ppt.equality_view != null : child_ppt.name();<a name="line.322"></a>
+<span class="sourceLineNo">323</span>        assert parent.equality_view != null : parent.name();<a name="line.323"></a>
+<span class="sourceLineNo">324</span><a name="line.324"></a>
+<span class="sourceLineNo">325</span>        invs[childno] = new ArrayList&lt;Invariant&gt;(); // permuted to parent<a name="line.325"></a>
+<span class="sourceLineNo">326</span><a name="line.326"></a>
+<span class="sourceLineNo">327</span>        // vis is in parent order.  Find corresponding child vis, in child order.<a name="line.327"></a>
+<span class="sourceLineNo">328</span>        // Each of these arrays contains child vis.<a name="line.328"></a>
+<span class="sourceLineNo">329</span>        /*NNC:@MonotonicNonNull*/ VarInfo[] cvis_non_canonical = new VarInfo[vis.length];<a name="line.329"></a>
+<span class="sourceLineNo">330</span>        /*NNC:@MonotonicNonNull*/ VarInfo[] cvis = new VarInfo[vis.length];<a name="line.330"></a>
+<span class="sourceLineNo">331</span>        /*NNC:@MonotonicNonNull*/ VarInfo[] cvis_sorted = new VarInfo[vis.length];<a name="line.331"></a>
+<span class="sourceLineNo">332</span>        for (int kk = 0; kk &lt; vis.length; kk++) {<a name="line.332"></a>
+<span class="sourceLineNo">333</span>          cvis_non_canonical[kk] = matching_var(child_ppt, vis[kk]);<a name="line.333"></a>
+<span class="sourceLineNo">334</span>          cvis[kk] = cvis_non_canonical[kk].canonicalRep();<a name="line.334"></a>
+<span class="sourceLineNo">335</span>          cvis_sorted[kk] = cvis[kk];<a name="line.335"></a>
+<span class="sourceLineNo">336</span>        }<a name="line.336"></a>
+<span class="sourceLineNo">337</span>        Arrays.sort(cvis_sorted, VarInfo.IndexComparator.getInstance());<a name="line.337"></a>
+<span class="sourceLineNo">338</span><a name="line.338"></a>
+<span class="sourceLineNo">339</span>        cvis_non_canonical = castNonNullDeep(cvis_non_canonical); // https://tinyurl.com/cfissue/986<a name="line.339"></a>
+<span class="sourceLineNo">340</span>        cvis = castNonNullDeep(cvis); // https://tinyurl.com/cfissue/986<a name="line.340"></a>
+<span class="sourceLineNo">341</span>        cvis_sorted = castNonNullDeep(cvis_sorted); // https://tinyurl.com/cfissue/986<a name="line.341"></a>
+<span class="sourceLineNo">342</span><a name="line.342"></a>
+<span class="sourceLineNo">343</span>        // Look for an equality invariant in the non-canonical slice (if any).<a name="line.343"></a>
+<span class="sourceLineNo">344</span>        // Note that only an equality invariant can exist in a non-canonical<a name="line.344"></a>
+<span class="sourceLineNo">345</span>        // slice.  If it does exist, we want it rather than the canonical<a name="line.345"></a>
+<span class="sourceLineNo">346</span>        // form (which for equality invariants will always be of the form<a name="line.346"></a>
+<span class="sourceLineNo">347</span>        // 'a == a').<a name="line.347"></a>
+<span class="sourceLineNo">348</span>        Invariant eq_inv = null;<a name="line.348"></a>
+<span class="sourceLineNo">349</span>        if (!Arrays.equals(cvis_non_canonical, cvis)) {<a name="line.349"></a>
+<span class="sourceLineNo">350</span>          PptSlice nc_slice = child_ppt.findSlice(cvis_non_canonical);<a name="line.350"></a>
+<span class="sourceLineNo">351</span>          if (nc_slice != null) {<a name="line.351"></a>
+<span class="sourceLineNo">352</span>            if (nc_slice.invs.size() != 1) {<a name="line.352"></a>
+<span class="sourceLineNo">353</span>              // Impossible: multiple invariants found<a name="line.353"></a>
+<span class="sourceLineNo">354</span>              System.out.println("Found " + nc_slice.invs.size() + " invs at " + nc_slice);<a name="line.354"></a>
+<span class="sourceLineNo">355</span>              for (Invariant inv2 : nc_slice.invs) {<a name="line.355"></a>
+<span class="sourceLineNo">356</span>                System.out.println(" -- inv = " + inv2);<a name="line.356"></a>
+<span class="sourceLineNo">357</span>              }<a name="line.357"></a>
+<span class="sourceLineNo">358</span>              for (VarInfo cvi : cvis_non_canonical) {<a name="line.358"></a>
+<span class="sourceLineNo">359</span>                System.out.println(" -- equality set = " + cvi.equalitySet.shortString());<a name="line.359"></a>
+<span class="sourceLineNo">360</span>              }<a name="line.360"></a>
+<span class="sourceLineNo">361</span>              throw new Error("nc_slice.invs.size() == " + nc_slice.invs.size());<a name="line.361"></a>
+<span class="sourceLineNo">362</span>            }<a name="line.362"></a>
+<span class="sourceLineNo">363</span>            eq_inv = nc_slice.invs.get(0);<a name="line.363"></a>
+<span class="sourceLineNo">364</span>            debug.fine("Found eq inv " + eq_inv);<a name="line.364"></a>
+<span class="sourceLineNo">365</span>          }<a name="line.365"></a>
+<span class="sourceLineNo">366</span>        }<a name="line.366"></a>
+<span class="sourceLineNo">367</span><a name="line.367"></a>
+<span class="sourceLineNo">368</span>        // Find the corresponding slice<a name="line.368"></a>
+<span class="sourceLineNo">369</span>        PptSlice cslice = child_ppt.findSlice(cvis_sorted);<a name="line.369"></a>
+<span class="sourceLineNo">370</span>        if (cslice == null) {<a name="line.370"></a>
+<span class="sourceLineNo">371</span>          if (eq_inv != null) {<a name="line.371"></a>
+<span class="sourceLineNo">372</span>            // There is trouble.  Print a lot of debugging information.<a name="line.372"></a>
+<span class="sourceLineNo">373</span>            System.out.println("cvis_non_canonical:");<a name="line.373"></a>
+<span class="sourceLineNo">374</span>            for (VarInfo cvi : cvis_non_canonical) {<a name="line.374"></a>
+<span class="sourceLineNo">375</span>              System.out.println("  " + cvi);<a name="line.375"></a>
+<span class="sourceLineNo">376</span>            }<a name="line.376"></a>
+<span class="sourceLineNo">377</span>            System.out.println("cvis:");<a name="line.377"></a>
+<span class="sourceLineNo">378</span>            for (VarInfo cvi : cvis) {<a name="line.378"></a>
+<span class="sourceLineNo">379</span>              System.out.println("  " + cvi);<a name="line.379"></a>
+<span class="sourceLineNo">380</span>            }<a name="line.380"></a>
+<span class="sourceLineNo">381</span>            System.out.println("cvis_sorted:");<a name="line.381"></a>
+<span class="sourceLineNo">382</span>            for (VarInfo cvi : cvis_sorted) {<a name="line.382"></a>
+<span class="sourceLineNo">383</span>              System.out.println("  " + cvi);<a name="line.383"></a>
+<span class="sourceLineNo">384</span>            }<a name="line.384"></a>
+<span class="sourceLineNo">385</span>            if (DynamicConstants.dkconfig_use_dynamic_constant_optimization) {<a name="line.385"></a>
+<span class="sourceLineNo">386</span>              assert child_ppt.constants != null<a name="line.386"></a>
+<span class="sourceLineNo">387</span>                  : "@AssumeAssertion(nullness):  dependent:  config var";<a name="line.387"></a>
+<span class="sourceLineNo">388</span>              System.out.println("constant values for cvis_sorted:");<a name="line.388"></a>
+<span class="sourceLineNo">389</span>              for (VarInfo cvi : cvis_sorted) {<a name="line.389"></a>
+<span class="sourceLineNo">390</span>                System.out.println("  " + child_ppt.constants.getConstant(cvi));<a name="line.390"></a>
+<span class="sourceLineNo">391</span>              }<a name="line.391"></a>
+<span class="sourceLineNo">392</span>            }<a name="line.392"></a>
+<span class="sourceLineNo">393</span>            String eq_inv_ppt = eq_inv.ppt.toString();<a name="line.393"></a>
+<span class="sourceLineNo">394</span>            assert eq_inv.ppt.equals(child_ppt.findSlice(cvis_non_canonical));<a name="line.394"></a>
+<span class="sourceLineNo">395</span><a name="line.395"></a>
+<span class="sourceLineNo">396</span>            System.out.println("All child_ppt slices: ");<a name="line.396"></a>
+<span class="sourceLineNo">397</span>            for (PptSlice slice : child_ppt.views_iterable()) {<a name="line.397"></a>
+<span class="sourceLineNo">398</span>              System.out.println("  " + slice);<a name="line.398"></a>
+<span class="sourceLineNo">399</span>            }<a name="line.399"></a>
+<span class="sourceLineNo">400</span><a name="line.400"></a>
+<span class="sourceLineNo">401</span>            // found slice on non-canonical, but didn't find it here<a name="line.401"></a>
+<span class="sourceLineNo">402</span>            throw new RuntimeException(<a name="line.402"></a>
+<span class="sourceLineNo">403</span>                String.join(<a name="line.403"></a>
+<span class="sourceLineNo">404</span>                    System.lineSeparator(),<a name="line.404"></a>
+<span class="sourceLineNo">405</span>                    "found eq_inv",<a name="line.405"></a>
+<span class="sourceLineNo">406</span>                    "  " + eq_inv,<a name="line.406"></a>
+<span class="sourceLineNo">407</span>                    "  @" + eq_inv_ppt,<a name="line.407"></a>
+<span class="sourceLineNo">408</span>                    "  but can't find slice for " + Arrays.toString(cvis_sorted)));<a name="line.408"></a>
+<span class="sourceLineNo">409</span>          }<a name="line.409"></a>
+<span class="sourceLineNo">410</span>          // If no slice, just give up?<a name="line.410"></a>
+<span class="sourceLineNo">411</span>          continue;<a name="line.411"></a>
+<span class="sourceLineNo">412</span>        }<a name="line.412"></a>
+<span class="sourceLineNo">413</span><a name="line.413"></a>
+<span class="sourceLineNo">414</span>        // Copy each invariant permuted to the parent.<a name="line.414"></a>
+<span class="sourceLineNo">415</span>        // This permits them to be directly compared to one another.<a name="line.415"></a>
+<span class="sourceLineNo">416</span>        int[] permute = PptTopLevel.build_permute(cvis_sorted, cvis);<a name="line.416"></a>
+<span class="sourceLineNo">417</span>        for (Invariant orig_inv : cslice.invs) {<a name="line.417"></a>
+<span class="sourceLineNo">418</span>          Invariant inv = orig_inv.clone_and_permute(permute);<a name="line.418"></a>
+<span class="sourceLineNo">419</span>          inv.ppt = pslice;<a name="line.419"></a>
+<span class="sourceLineNo">420</span>          if ((eq_inv != null) &amp;&amp; orig_inv.getClass().equals(eq_inv.getClass())) orig_inv = eq_inv;<a name="line.420"></a>
+<span class="sourceLineNo">421</span>          assert !orig_invs.containsKey(inv);<a name="line.421"></a>
+<span class="sourceLineNo">422</span>          orig_invs.put(inv, orig_inv);<a name="line.422"></a>
+<span class="sourceLineNo">423</span>          invs[childno].add(inv);<a name="line.423"></a>
+<span class="sourceLineNo">424</span>        }<a name="line.424"></a>
+<span class="sourceLineNo">425</span>      } // children loop<a name="line.425"></a>
+<span class="sourceLineNo">426</span><a name="line.426"></a>
+<span class="sourceLineNo">427</span>      invs = castNonNullDeep(invs); // https://tinyurl.com/cfissue/986<a name="line.427"></a>
+<span class="sourceLineNo">428</span><a name="line.428"></a>
+<span class="sourceLineNo">429</span>      // If neither child slice has invariants there is nothing to do<a name="line.429"></a>
+<span class="sourceLineNo">430</span>      if ((invs[0].size() == 0) &amp;&amp; (invs[1].size() == 0)) {<a name="line.430"></a>
+<span class="sourceLineNo">431</span>        if (pslice.invs.size() == 0) parent.removeSlice(pslice);<a name="line.431"></a>
+<span class="sourceLineNo">432</span>        continue;<a name="line.432"></a>
+<span class="sourceLineNo">433</span>      }<a name="line.433"></a>
+<span class="sourceLineNo">434</span><a name="line.434"></a>
+<span class="sourceLineNo">435</span>      if (pslice.invs.size() == 0) {<a name="line.435"></a>
+<span class="sourceLineNo">436</span>        debug.fine("PptSplitter: created new slice " + Arrays.toString(vis) + " @" + parent.name);<a name="line.436"></a>
+<span class="sourceLineNo">437</span>      }<a name="line.437"></a>
+<span class="sourceLineNo">438</span><a name="line.438"></a>
+<span class="sourceLineNo">439</span>      // Add any exclusive conditions for this slice to the list<a name="line.439"></a>
+<span class="sourceLineNo">440</span>      @SuppressWarnings("keyfor") // need qualifier parameter to Invariants<a name="line.440"></a>
+<span class="sourceLineNo">441</span>      List&lt;@KeyFor("orig_invs") Invariant[]&gt; ec = exclusive_conditions(invs[0], invs[1]);<a name="line.441"></a>
+<span class="sourceLineNo">442</span>      exclusive_invs_vec.addAll(ec);<a name="line.442"></a>
+<span class="sourceLineNo">443</span><a name="line.443"></a>
+<span class="sourceLineNo">444</span>      // Add any invariants that are different to the list<a name="line.444"></a>
+<span class="sourceLineNo">445</span>      @SuppressWarnings("keyfor") // need qualifier parameter to Invariants<a name="line.445"></a>
+<span class="sourceLineNo">446</span>      List&lt;@Nullable @KeyFor("orig_invs") Invariant[]&gt; di = different_invariants(invs[0], invs[1]);<a name="line.446"></a>
+<span class="sourceLineNo">447</span>      different_invs_vec.addAll(di);<a name="line.447"></a>
+<span class="sourceLineNo">448</span>    } // slices.iterator() loop<a name="line.448"></a>
+<span class="sourceLineNo">449</span><a name="line.449"></a>
+<span class="sourceLineNo">450</span>    if (debug.isLoggable(Level.FINE)) {<a name="line.450"></a>
+<span class="sourceLineNo">451</span>      debug.fine("Found " + exclusive_invs_vec.size() + " exclusive conditions ");<a name="line.451"></a>
+<span class="sourceLineNo">452</span>      for (Invariant[] invs : exclusive_invs_vec) {<a name="line.452"></a>
+<span class="sourceLineNo">453</span>        invs[0].log("exclusive condition with %s", invs[1].format());<a name="line.453"></a>
+<span class="sourceLineNo">454</span>        invs[1].log("exclusive condition with %s", invs[0].format());<a name="line.454"></a>
+<span class="sourceLineNo">455</span>        debug.fine("-- " + invs[0] + " -- " + invs[1]);<a name="line.455"></a>
+<span class="sourceLineNo">456</span>      }<a name="line.456"></a>
+<span class="sourceLineNo">457</span>      debug.fine("Found " + different_invs_vec.size() + " different invariants ");<a name="line.457"></a>
+<span class="sourceLineNo">458</span>      for (@Nullable Invariant[] invs : different_invs_vec) {<a name="line.458"></a>
+<span class="sourceLineNo">459</span>        if (invs[0] != null) invs[0].log("%s differs from %s", invs[0], invs[1]);<a name="line.459"></a>
+<span class="sourceLineNo">460</span>        if (invs[1] != null) invs[1].log("%s differs from %s", invs[0], invs[1]);<a name="line.460"></a>
+<span class="sourceLineNo">461</span>        debug.fine("-- " + invs[0] + " -- " + invs[1]);<a name="line.461"></a>
+<span class="sourceLineNo">462</span>      }<a name="line.462"></a>
+<span class="sourceLineNo">463</span>    }<a name="line.463"></a>
+<span class="sourceLineNo">464</span><a name="line.464"></a>
+<span class="sourceLineNo">465</span>    PptTopLevel ppt1 = ppts[0];<a name="line.465"></a>
+<span class="sourceLineNo">466</span>    PptTopLevel ppt2 = ppts[1];<a name="line.466"></a>
+<span class="sourceLineNo">467</span><a name="line.467"></a>
+<span class="sourceLineNo">468</span>    // Add the splitting condition as an exclusive condition if requested<a name="line.468"></a>
+<span class="sourceLineNo">469</span>    if ((splitter != null) &amp;&amp; dkconfig_dummy_invariant_level &gt; 0) {<a name="line.469"></a>
+<span class="sourceLineNo">470</span>      if (exclusive_invs_vec.size() == 0 || dkconfig_dummy_invariant_level &gt;= 2) {<a name="line.470"></a>
+<span class="sourceLineNo">471</span>        // As a last resort, try using the user's supplied DummyInvariant<a name="line.471"></a>
+<span class="sourceLineNo">472</span>        debug.fine("addImplications: resorting to dummy");<a name="line.472"></a>
+<span class="sourceLineNo">473</span>        PptConditional cond1 = (PptConditional) ppt1;<a name="line.473"></a>
+<span class="sourceLineNo">474</span>        PptConditional cond2 = (PptConditional) ppt2;<a name="line.474"></a>
+<span class="sourceLineNo">475</span>        debug.fine("addImplications: cond1 " + cond1 + " cond2 " + cond2);<a name="line.475"></a>
+<span class="sourceLineNo">476</span>        cond1.splitter.instantiateDummy(ppt1);<a name="line.476"></a>
+<span class="sourceLineNo">477</span>        cond2.splitter.instantiateDummy(ppt2);<a name="line.477"></a>
+<span class="sourceLineNo">478</span>        DummyInvariant dummy1 = cond1.dummyInvariant();<a name="line.478"></a>
+<span class="sourceLineNo">479</span>        DummyInvariant dummy2 = cond2.dummyInvariant();<a name="line.479"></a>
+<span class="sourceLineNo">480</span>        debug.fine("addImplications: dummy1 " + dummy1 + " dummy2 " + dummy2);<a name="line.480"></a>
+<span class="sourceLineNo">481</span>        if (dummy1 != null &amp;&amp; dummy1.valid &amp;&amp; dummy2 != null &amp;&amp; dummy2.valid) {<a name="line.481"></a>
+<span class="sourceLineNo">482</span>          assert !cond1.splitter_inverse;<a name="line.482"></a>
+<span class="sourceLineNo">483</span>          assert cond2.splitter_inverse;<a name="line.483"></a>
+<span class="sourceLineNo">484</span>          dummy2.negate();<a name="line.484"></a>
+<span class="sourceLineNo">485</span>          orig_invs.put(dummy1, dummy1);<a name="line.485"></a>
+<span class="sourceLineNo">486</span>          orig_invs.put(dummy2, dummy2);<a name="line.486"></a>
+<span class="sourceLineNo">487</span>          @KeyFor("orig_invs") Invariant[] dummy_pair = new @KeyFor("orig_invs") Invariant[] {dummy1, dummy2};<a name="line.487"></a>
+<span class="sourceLineNo">488</span>          exclusive_invs_vec.add(dummy_pair);<a name="line.488"></a>
+<span class="sourceLineNo">489</span>          // Don't add the dummy_pair, as it would just be removed afterward.<a name="line.489"></a>
+<span class="sourceLineNo">490</span>          // different_invs_vec.add(dummy_pair);<a name="line.490"></a>
+<span class="sourceLineNo">491</span>        } else {<a name="line.491"></a>
+<span class="sourceLineNo">492</span>          // nothing to do<a name="line.492"></a>
+<span class="sourceLineNo">493</span>        }<a name="line.493"></a>
+<span class="sourceLineNo">494</span>      }<a name="line.494"></a>
+<span class="sourceLineNo">495</span>    }<a name="line.495"></a>
+<span class="sourceLineNo">496</span><a name="line.496"></a>
+<span class="sourceLineNo">497</span>    // If there are no exclusive conditions, we can do nothing here<a name="line.497"></a>
+<span class="sourceLineNo">498</span>    if (exclusive_invs_vec.size() == 0) {<a name="line.498"></a>
+<span class="sourceLineNo">499</span>      debug.fine("addImplications: no exclusive conditions");<a name="line.499"></a>
+<span class="sourceLineNo">500</span>      return;<a name="line.500"></a>
+<span class="sourceLineNo">501</span>    }<a name="line.501"></a>
+<span class="sourceLineNo">502</span><a name="line.502"></a>
+<span class="sourceLineNo">503</span>    // Remove exclusive invariants from the different invariants list.<a name="line.503"></a>
+<span class="sourceLineNo">504</span>    // It would be better not to have added them in the first place,<a name="line.504"></a>
+<span class="sourceLineNo">505</span>    // but this is easier for now.<a name="line.505"></a>
+<span class="sourceLineNo">506</span>    for (Iterator&lt;@Nullable @KeyFor("orig_invs") Invariant[]&gt; ii = different_invs_vec.iterator();<a name="line.506"></a>
+<span class="sourceLineNo">507</span>        ii.hasNext(); ) {<a name="line.507"></a>
+<span class="sourceLineNo">508</span>      @Nullable Invariant[] diff_invs = ii.next();<a name="line.508"></a>
+<span class="sourceLineNo">509</span>      if (diff_invs[0] != null) {<a name="line.509"></a>
+<span class="sourceLineNo">510</span>        assert diff_invs[1] == null;<a name="line.510"></a>
+<span class="sourceLineNo">511</span>        // debug.fine ("Considering inv0 " + diff_invs[0]);<a name="line.511"></a>
+<span class="sourceLineNo">512</span>        for (Invariant[] ex_invs : exclusive_invs_vec) {<a name="line.512"></a>
+<span class="sourceLineNo">513</span>          if (ex_invs[0] == diff_invs[0]) {<a name="line.513"></a>
+<span class="sourceLineNo">514</span>            debug.fine("removed exclusive invariant " + ex_invs[0]);<a name="line.514"></a>
+<span class="sourceLineNo">515</span>            ii.remove();<a name="line.515"></a>
+<span class="sourceLineNo">516</span>            break;<a name="line.516"></a>
+<span class="sourceLineNo">517</span>          }<a name="line.517"></a>
+<span class="sourceLineNo">518</span>        }<a name="line.518"></a>
+<span class="sourceLineNo">519</span>      } else {<a name="line.519"></a>
+<span class="sourceLineNo">520</span>        assert diff_invs[1] != null;<a name="line.520"></a>
+<span class="sourceLineNo">521</span>        // debug.fine ("Considering inv1 " + diff_invs[1]);<a name="line.521"></a>
+<span class="sourceLineNo">522</span>        for (Invariant[] ex_invs : exclusive_invs_vec) {<a name="line.522"></a>
+<span class="sourceLineNo">523</span>          if (ex_invs[1] == diff_invs[1]) {<a name="line.523"></a>
+<span class="sourceLineNo">524</span>            debug.fine("removed exclusive invariant " + ex_invs[1]);<a name="line.524"></a>
+<span class="sourceLineNo">525</span>            ii.remove();<a name="line.525"></a>
+<span class="sourceLineNo">526</span>            break;<a name="line.526"></a>
+<span class="sourceLineNo">527</span>          }<a name="line.527"></a>
+<span class="sourceLineNo">528</span>        }<a name="line.528"></a>
+<span class="sourceLineNo">529</span>      }<a name="line.529"></a>
+<span class="sourceLineNo">530</span>    }<a name="line.530"></a>
+<span class="sourceLineNo">531</span><a name="line.531"></a>
+<span class="sourceLineNo">532</span>    // Get the canonical predicate invariants from the exclusive list.<a name="line.532"></a>
+<span class="sourceLineNo">533</span>    // We pick the first one that is neither obvious nor suppressed.<a name="line.533"></a>
+<span class="sourceLineNo">534</span>    // If all are either obvious or suppressed, we just pick the first<a name="line.534"></a>
+<span class="sourceLineNo">535</span>    // one in the list.<a name="line.535"></a>
+<span class="sourceLineNo">536</span>    // TODO: Why do we want canonical predicate invariants?  How will they be used?  It seems that<a name="line.536"></a>
+<span class="sourceLineNo">537</span>    // different elements of this list have different semantics.<a name="line.537"></a>
+<span class="sourceLineNo">538</span>    // TODO: After this loop, might the two canonical invariants not be exclusive with one another?<a name="line.538"></a>
+<span class="sourceLineNo">539</span>    // TODO: con_invs should probably be renamed to canon_invs.<a name="line.539"></a>
+<span class="sourceLineNo">540</span>    /*NNC:@MonotonicNonNull*/ Invariant[] con_invs = new Invariant[2];<a name="line.540"></a>
+<span class="sourceLineNo">541</span>    for (Invariant[] invs : exclusive_invs_vec) {<a name="line.541"></a>
+<span class="sourceLineNo">542</span>      assert invs.length == 2;<a name="line.542"></a>
+<span class="sourceLineNo">543</span>      for (int jj = 0; jj &lt; con_invs.length; jj++) {<a name="line.543"></a>
+<span class="sourceLineNo">544</span>        if (con_invs[jj] == null) {<a name="line.544"></a>
+<span class="sourceLineNo">545</span>          @SuppressWarnings("nullness") // map<a name="line.545"></a>
+<span class="sourceLineNo">546</span>          @NonNull Invariant orig = orig_invs.get(invs[jj]);<a name="line.546"></a>
+<span class="sourceLineNo">547</span>          assert orig != null : "Not in orig_invs: " + invs[jj] + " " + invs[jj].getClass();<a name="line.547"></a>
+<span class="sourceLineNo">548</span>          if ((orig.isObvious() == null) &amp;&amp; !orig.is_ni_suppressed()) con_invs[jj] = invs[jj];<a name="line.548"></a>
+<span class="sourceLineNo">549</span>        }<a name="line.549"></a>
+<span class="sourceLineNo">550</span>      }<a name="line.550"></a>
+<span class="sourceLineNo">551</span>    }<a name="line.551"></a>
+<span class="sourceLineNo">552</span>    Invariant[] first = exclusive_invs_vec.get(0);<a name="line.552"></a>
+<span class="sourceLineNo">553</span>    for (int jj = 0; jj &lt; con_invs.length; jj++) {<a name="line.553"></a>
+<span class="sourceLineNo">554</span>      if (con_invs[jj] == null) {<a name="line.554"></a>
+<span class="sourceLineNo">555</span>        System.out.println(<a name="line.555"></a>
+<span class="sourceLineNo">556</span>            "Warning: No non-obvious non-suppressed exclusive"<a name="line.556"></a>
+<span class="sourceLineNo">557</span>                + " invariants found in "<a name="line.557"></a>
+<span class="sourceLineNo">558</span>                + parent.name);<a name="line.558"></a>
+<span class="sourceLineNo">559</span>        // throw new Error();<a name="line.559"></a>
+<span class="sourceLineNo">560</span>        con_invs[jj] = first[jj];<a name="line.560"></a>
+<span class="sourceLineNo">561</span>      }<a name="line.561"></a>
+<span class="sourceLineNo">562</span>    }<a name="line.562"></a>
+<span class="sourceLineNo">563</span>    con_invs = castNonNullDeep(con_invs); // https://tinyurl.com/cfissue/986<a name="line.563"></a>
+<span class="sourceLineNo">564</span><a name="line.564"></a>
+<span class="sourceLineNo">565</span>    // Create double-implications for each exclusive invariant<a name="line.565"></a>
+<span class="sourceLineNo">566</span>    for (Invariant[] invs : exclusive_invs_vec) {<a name="line.566"></a>
+<span class="sourceLineNo">567</span>      for (int jj = 0; jj &lt; con_invs.length; jj++) {<a name="line.567"></a>
+<span class="sourceLineNo">568</span>        if (con_invs[jj] != invs[jj]) {<a name="line.568"></a>
+<span class="sourceLineNo">569</span>          add_implication(parent, con_invs[jj], invs[jj], true, orig_invs);<a name="line.569"></a>
+<span class="sourceLineNo">570</span>        }<a name="line.570"></a>
+<span class="sourceLineNo">571</span>      }<a name="line.571"></a>
+<span class="sourceLineNo">572</span>    }<a name="line.572"></a>
+<span class="sourceLineNo">573</span><a name="line.573"></a>
+<span class="sourceLineNo">574</span>    // Create single implication for each different invariant<a name="line.574"></a>
+<span class="sourceLineNo">575</span>    for (@Nullable Invariant[] invs : different_invs_vec) {<a name="line.575"></a>
+<span class="sourceLineNo">576</span>      for (int jj = 0; jj &lt; con_invs.length; jj++) {<a name="line.576"></a>
+<span class="sourceLineNo">577</span>        if (invs[jj] != null) add_implication(parent, con_invs[jj], invs[jj], false, orig_invs);<a name="line.577"></a>
+<span class="sourceLineNo">578</span>      }<a name="line.578"></a>
+<span class="sourceLineNo">579</span>    }<a name="line.579"></a>
+<span class="sourceLineNo">580</span>  } // add_implications_pair<a name="line.580"></a>
+<span class="sourceLineNo">581</span><a name="line.581"></a>
+<span class="sourceLineNo">582</span>  /**<a name="line.582"></a>
+<span class="sourceLineNo">583</span>   * Returns a list of all possible slices that may appear at the parent. The parent must have<a name="line.583"></a>
+<span class="sourceLineNo">584</span>   * already been created by merging the invariants from its child conditionals.<a name="line.584"></a>
+<span class="sourceLineNo">585</span>   *<a name="line.585"></a>
+<span class="sourceLineNo">586</span>   * &lt;p&gt;This is a subset of the slices that actually exist at the parent because the parent may have<a name="line.586"></a>
+<span class="sourceLineNo">587</span>   * implications created from invariants in child slices that only exist in one child (and thus<a name="line.587"></a>
+<span class="sourceLineNo">588</span>   * don't exist in the parent).<a name="line.588"></a>
+<span class="sourceLineNo">589</span>   */<a name="line.589"></a>
+<span class="sourceLineNo">590</span>  @RequiresNonNull("parent.equality_view")<a name="line.590"></a>
+<span class="sourceLineNo">591</span>  private List&lt;VarInfo[]&gt; possible_slices() {<a name="line.591"></a>
+<span class="sourceLineNo">592</span><a name="line.592"></a>
+<span class="sourceLineNo">593</span>    List&lt;VarInfo[]&gt; result = new ArrayList&lt;&gt;();<a name="line.593"></a>
+<span class="sourceLineNo">594</span><a name="line.594"></a>
+<span class="sourceLineNo">595</span>    // Get an array of leaders at the parent to build slices over<a name="line.595"></a>
+<span class="sourceLineNo">596</span>    VarInfo[] leaders = parent.equality_view.get_leaders_sorted();<a name="line.596"></a>
+<span class="sourceLineNo">597</span><a name="line.597"></a>
+<span class="sourceLineNo">598</span>    // Create unary views<a name="line.598"></a>
+<span class="sourceLineNo">599</span>    for (int i = 0; i &lt; leaders.length; i++) {<a name="line.599"></a>
+<span class="sourceLineNo">600</span>      if (parent.is_slice_ok(leaders[i])) {<a name="line.600"></a>
+<span class="sourceLineNo">601</span>        result.add(new VarInfo[] {leaders[i]});<a name="line.601"></a>
+<span class="sourceLineNo">602</span>      }<a name="line.602"></a>
+<span class="sourceLineNo">603</span>    }<a name="line.603"></a>
+<span class="sourceLineNo">604</span><a name="line.604"></a>
+<span class="sourceLineNo">605</span>    // Create binary views<a name="line.605"></a>
+<span class="sourceLineNo">606</span>    for (int i = 0; i &lt; leaders.length; i++) {<a name="line.606"></a>
+<span class="sourceLineNo">607</span>      for (int j = i; j &lt; leaders.length; j++) {<a name="line.607"></a>
+<span class="sourceLineNo">608</span>        if (parent.is_slice_ok(leaders[i], leaders[j])) {<a name="line.608"></a>
+<span class="sourceLineNo">609</span>          result.add(new VarInfo[] {leaders[i], leaders[j]});<a name="line.609"></a>
+<span class="sourceLineNo">610</span>        }<a name="line.610"></a>
+<span class="sourceLineNo">611</span>      }<a name="line.611"></a>
+<span class="sourceLineNo">612</span>    }<a name="line.612"></a>
+<span class="sourceLineNo">613</span><a name="line.613"></a>
+<span class="sourceLineNo">614</span>    /// Expensive!<a name="line.614"></a>
+<span class="sourceLineNo">615</span>    /// ??? MDE<a name="line.615"></a>
+<span class="sourceLineNo">616</span>    // Create ternary views<a name="line.616"></a>
+<span class="sourceLineNo">617</span>    for (int i = 0; i &lt; leaders.length; i++) {<a name="line.617"></a>
+<span class="sourceLineNo">618</span>      for (int j = i; j &lt; leaders.length; j++) {<a name="line.618"></a>
+<span class="sourceLineNo">619</span>        for (int k = j; k &lt; leaders.length; k++) {<a name="line.619"></a>
+<span class="sourceLineNo">620</span>          if (parent.is_slice_ok(leaders[i], leaders[j], leaders[k])) {<a name="line.620"></a>
+<span class="sourceLineNo">621</span>            result.add(new VarInfo[] {leaders[i], leaders[j], leaders[k]});<a name="line.621"></a>
+<span class="sourceLineNo">622</span>          }<a name="line.622"></a>
+<span class="sourceLineNo">623</span>        }<a name="line.623"></a>
+<span class="sourceLineNo">624</span>      }<a name="line.624"></a>
+<span class="sourceLineNo">625</span>    }<a name="line.625"></a>
+<span class="sourceLineNo">626</span><a name="line.626"></a>
+<span class="sourceLineNo">627</span>    return result;<a name="line.627"></a>
+<span class="sourceLineNo">628</span>  }<a name="line.628"></a>
+<span class="sourceLineNo">629</span><a name="line.629"></a>
+<span class="sourceLineNo">630</span>  // Could be used in assertion that all invariants are at same point.<a name="line.630"></a>
+<span class="sourceLineNo">631</span>  @SuppressWarnings("UnusedMethod")<a name="line.631"></a>
+<span class="sourceLineNo">632</span>  private boolean at_same_ppt(List&lt;Invariant&gt; invs1, List&lt;Invariant&gt; invs2) {<a name="line.632"></a>
+<span class="sourceLineNo">633</span>    PptSlice ppt = null;<a name="line.633"></a>
+<span class="sourceLineNo">634</span>    Iterator&lt;Invariant&gt; itor =<a name="line.634"></a>
+<span class="sourceLineNo">635</span>        new CollectionsPlume.MergedIterator2&lt;Invariant&gt;(invs1.iterator(), invs2.iterator());<a name="line.635"></a>
+<span class="sourceLineNo">636</span>    for (; itor.hasNext(); ) {<a name="line.636"></a>
+<span class="sourceLineNo">637</span>      Invariant inv = itor.next();<a name="line.637"></a>
+<span class="sourceLineNo">638</span>      if (ppt == null) {<a name="line.638"></a>
+<span class="sourceLineNo">639</span>        ppt = inv.ppt;<a name="line.639"></a>
+<span class="sourceLineNo">640</span>      } else {<a name="line.640"></a>
+<span class="sourceLineNo">641</span>        if (inv.ppt != ppt) {<a name="line.641"></a>
+<span class="sourceLineNo">642</span>          return false;<a name="line.642"></a>
+<span class="sourceLineNo">643</span>        }<a name="line.643"></a>
+<span class="sourceLineNo">644</span>      }<a name="line.644"></a>
+<span class="sourceLineNo">645</span>    }<a name="line.645"></a>
+<span class="sourceLineNo">646</span>    return true;<a name="line.646"></a>
+<span class="sourceLineNo">647</span>  }<a name="line.647"></a>
+<span class="sourceLineNo">648</span><a name="line.648"></a>
+<span class="sourceLineNo">649</span>  // TODO: Should this only include invariants such that all of their variables are defined<a name="line.649"></a>
+<span class="sourceLineNo">650</span>  // everywhere?<a name="line.650"></a>
+<span class="sourceLineNo">651</span>  /**<a name="line.651"></a>
+<span class="sourceLineNo">652</span>   * Determine which elements of invs1 are mutually exclusive with elements of invs2. Result<a name="line.652"></a>
+<span class="sourceLineNo">653</span>   * elements are pairs of {@code List&lt;Invariant&gt;}. All the arguments should be over the same<a name="line.653"></a>
+<span class="sourceLineNo">654</span>   * program point.<a name="line.654"></a>
+<span class="sourceLineNo">655</span>   *<a name="line.655"></a>
+<span class="sourceLineNo">656</span>   * @param invs1 a set of invariants<a name="line.656"></a>
+<span class="sourceLineNo">657</span>   * @param invs2 a set of invariants<a name="line.657"></a>
+<span class="sourceLineNo">658</span>   */<a name="line.658"></a>
+<span class="sourceLineNo">659</span>  List&lt;Invariant[]&gt; exclusive_conditions(List&lt;Invariant&gt; invs1, List&lt;Invariant&gt; invs2) {<a name="line.659"></a>
+<span class="sourceLineNo">660</span><a name="line.660"></a>
+<span class="sourceLineNo">661</span>    List&lt;Invariant[]&gt; result = new ArrayList&lt;&gt;();<a name="line.661"></a>
+<span class="sourceLineNo">662</span>    for (Invariant inv1 : invs1) {<a name="line.662"></a>
+<span class="sourceLineNo">663</span>      for (Invariant inv2 : invs2) {<a name="line.663"></a>
+<span class="sourceLineNo">664</span>        // // This is a debugging tool, to make sure that various versions<a name="line.664"></a>
+<span class="sourceLineNo">665</span>        // // of isExclusiveFormula remain coordinated.  (That's also one<a name="line.665"></a>
+<span class="sourceLineNo">666</span>        // // reason we don't break out of the loop early:  also, there will<a name="line.666"></a>
+<span class="sourceLineNo">667</span>        // // be few invariants in a slice, so breaking out is of minimal<a name="line.667"></a>
+<span class="sourceLineNo">668</span>        // // benefit.)<a name="line.668"></a>
+<span class="sourceLineNo">669</span>        // assert inv1.isExclusiveFormula(inv2)<a name="line.669"></a>
+<span class="sourceLineNo">670</span>        //                  == inv2.isExclusiveFormula(inv1)<a name="line.670"></a>
+<span class="sourceLineNo">671</span>        //              : "Bad exclusivity: " + inv1.isExclusiveFormula(inv2)<a name="line.671"></a>
+<span class="sourceLineNo">672</span>        //               + " " + inv2.isExclusiveFormula(inv1)<a name="line.672"></a>
+<span class="sourceLineNo">673</span>        //               + "    " + inv1.format() + "    " + inv2.format();<a name="line.673"></a>
+<span class="sourceLineNo">674</span>        if (inv1.isExclusiveFormula(inv2)) {<a name="line.674"></a>
+<span class="sourceLineNo">675</span>          result.add(new Invariant[] {inv1, inv2});<a name="line.675"></a>
+<span class="sourceLineNo">676</span>        }<a name="line.676"></a>
+<span class="sourceLineNo">677</span>      }<a name="line.677"></a>
+<span class="sourceLineNo">678</span>    }<a name="line.678"></a>
+<span class="sourceLineNo">679</span>    return result;<a name="line.679"></a>
+<span class="sourceLineNo">680</span>  }<a name="line.680"></a>
+<span class="sourceLineNo">681</span><a name="line.681"></a>
+<span class="sourceLineNo">682</span>  /**<a name="line.682"></a>
+<span class="sourceLineNo">683</span>   * Determine which elements of invs1 differ from elements of invs2. Result elements are pairs of<a name="line.683"></a>
+<span class="sourceLineNo">684</span>   * {@code List&lt;Invariant&gt;} (with one or the other always null). All the arguments should be over<a name="line.684"></a>
+<span class="sourceLineNo">685</span>   * the same program point.<a name="line.685"></a>
+<span class="sourceLineNo">686</span>   *<a name="line.686"></a>
+<span class="sourceLineNo">687</span>   * @param invs1 a set of invariants<a name="line.687"></a>
+<span class="sourceLineNo">688</span>   * @param invs2 a set of invariants<a name="line.688"></a>
+<span class="sourceLineNo">689</span>   * @return invariants in the exclusive-or of {@code invs1} and {@code invs2}<a name="line.689"></a>
+<span class="sourceLineNo">690</span>   */<a name="line.690"></a>
+<span class="sourceLineNo">691</span>  List&lt;@Nullable Invariant[]&gt; different_invariants(List&lt;Invariant&gt; invs1, List&lt;Invariant&gt; invs2) {<a name="line.691"></a>
+<span class="sourceLineNo">692</span>    NavigableSet&lt;Invariant&gt; ss1 = new TreeSet&lt;&gt;(icfp);<a name="line.692"></a>
+<span class="sourceLineNo">693</span>    ss1.addAll(invs1);<a name="line.693"></a>
+<span class="sourceLineNo">694</span>    NavigableSet&lt;Invariant&gt; ss2 = new TreeSet&lt;&gt;(icfp);<a name="line.694"></a>
+<span class="sourceLineNo">695</span>    ss2.addAll(invs2);<a name="line.695"></a>
+<span class="sourceLineNo">696</span>    List&lt;@Nullable Invariant[]&gt; result = new ArrayList&lt;&gt;();<a name="line.696"></a>
+<span class="sourceLineNo">697</span>    for (OrderedPairIterator&lt;Invariant&gt; opi =<a name="line.697"></a>
+<span class="sourceLineNo">698</span>            new OrderedPairIterator&lt;Invariant&gt;(ss1.iterator(), ss2.iterator(), icfp);<a name="line.698"></a>
+<span class="sourceLineNo">699</span>        opi.hasNext(); ) {<a name="line.699"></a>
+<span class="sourceLineNo">700</span>      Pair&lt;@Nullable Invariant, @Nullable Invariant&gt; pair = opi.next();<a name="line.700"></a>
+<span class="sourceLineNo">701</span>      if ((pair.a == null) || (pair.b == null)<a name="line.701"></a>
+<span class="sourceLineNo">702</span>      // || (icfp.compare(pair.a, pair.b) != 0)<a name="line.702"></a>
+<span class="sourceLineNo">703</span>      ) {<a name="line.703"></a>
+<span class="sourceLineNo">704</span>        result.add(new @Nullable Invariant[] {pair.a, pair.b});<a name="line.704"></a>
+<span class="sourceLineNo">705</span>      }<a name="line.705"></a>
+<span class="sourceLineNo">706</span>    }<a name="line.706"></a>
+<span class="sourceLineNo">707</span>    return result;<a name="line.707"></a>
+<span class="sourceLineNo">708</span>  }<a name="line.708"></a>
+<span class="sourceLineNo">709</span><a name="line.709"></a>
+<span class="sourceLineNo">710</span>  /**<a name="line.710"></a>
+<span class="sourceLineNo">711</span>   * Determine which elements of invs1 are the same as elements of invs2. Result elements are {@code<a name="line.711"></a>
+<span class="sourceLineNo">712</span>   * List&lt;Invariant&gt;} (from the invs1 list). All the arguments should be over the same program<a name="line.712"></a>
+<span class="sourceLineNo">713</span>   * point.<a name="line.713"></a>
+<span class="sourceLineNo">714</span>   *<a name="line.714"></a>
+<span class="sourceLineNo">715</span>   * @param invs1 a set of invariants<a name="line.715"></a>
+<span class="sourceLineNo">716</span>   * @param invs2 a set of invariants<a name="line.716"></a>
+<span class="sourceLineNo">717</span>   * @return the intersection of {@code invs1} and {@code invs2}<a name="line.717"></a>
+<span class="sourceLineNo">718</span>   */<a name="line.718"></a>
+<span class="sourceLineNo">719</span>  List&lt;Invariant&gt; same_invariants(List&lt;Invariant&gt; invs1, List&lt;Invariant&gt; invs2) {<a name="line.719"></a>
+<span class="sourceLineNo">720</span><a name="line.720"></a>
+<span class="sourceLineNo">721</span>    NavigableSet&lt;Invariant&gt; ss1 = new TreeSet&lt;&gt;(icfp);<a name="line.721"></a>
+<span class="sourceLineNo">722</span>    ss1.addAll(invs1);<a name="line.722"></a>
+<span class="sourceLineNo">723</span>    NavigableSet&lt;Invariant&gt; ss2 = new TreeSet&lt;&gt;(icfp);<a name="line.723"></a>
+<span class="sourceLineNo">724</span>    ss2.addAll(invs2);<a name="line.724"></a>
+<span class="sourceLineNo">725</span><a name="line.725"></a>
+<span class="sourceLineNo">726</span>    ss1.retainAll(ss2);<a name="line.726"></a>
+<span class="sourceLineNo">727</span>    return new ArrayList&lt;Invariant&gt;(ss1);<a name="line.727"></a>
+<span class="sourceLineNo">728</span><a name="line.728"></a>
+<span class="sourceLineNo">729</span>    // // This seems like a rather complicated implementation.  Why can't it<a name="line.729"></a>
+<span class="sourceLineNo">730</span>    // // just use set intersection?<a name="line.730"></a>
+<span class="sourceLineNo">731</span>    // List&lt;@Nullable Invariant&gt; result = new ArrayList&lt;&gt;();<a name="line.731"></a>
+<span class="sourceLineNo">732</span>    // for (OrderedPairIterator&lt;Invariant&gt; opi = new OrderedPairIterator&lt;&gt;(ss1.iterator(),<a name="line.732"></a>
+<span class="sourceLineNo">733</span>    //                                 ss2.iterator(), icfp);<a name="line.733"></a>
+<span class="sourceLineNo">734</span>    //      opi.hasNext(); ) {<a name="line.734"></a>
+<span class="sourceLineNo">735</span>    //   Pair&lt;@Nullable Invariant,@Nullable Invariant&gt; pair = opi.next();<a name="line.735"></a>
+<span class="sourceLineNo">736</span>    //   if (pair.a != null &amp;&amp; pair.b != null) {<a name="line.736"></a>
+<span class="sourceLineNo">737</span>    //     Invariant inv1 = pair.a;<a name="line.737"></a>
+<span class="sourceLineNo">738</span>    //     Invariant inv2 = pair.b;<a name="line.738"></a>
+<span class="sourceLineNo">739</span>    //     result.add(inv1);<a name="line.739"></a>
+<span class="sourceLineNo">740</span>    //   }<a name="line.740"></a>
+<span class="sourceLineNo">741</span>    // }<a name="line.741"></a>
+<span class="sourceLineNo">742</span>    // return result;<a name="line.742"></a>
+<span class="sourceLineNo">743</span>  }<a name="line.743"></a>
+<span class="sourceLineNo">744</span><a name="line.744"></a>
+<span class="sourceLineNo">745</span>  /**<a name="line.745"></a>
+<span class="sourceLineNo">746</span>   * If the implication specified by predicate and consequent is a valid implication, adds it to the<a name="line.746"></a>
+<span class="sourceLineNo">747</span>   * joiner view of parent.<a name="line.747"></a>
+<span class="sourceLineNo">748</span>   *<a name="line.748"></a>
+<span class="sourceLineNo">749</span>   * @param orig_invs maps permuted invariants to their original invariants<a name="line.749"></a>
+<span class="sourceLineNo">750</span>   */<a name="line.750"></a>
+<span class="sourceLineNo">751</span>  public void add_implication(<a name="line.751"></a>
+<span class="sourceLineNo">752</span>      PptTopLevel ppt,<a name="line.752"></a>
+<span class="sourceLineNo">753</span>      Invariant predicate,<a name="line.753"></a>
+<span class="sourceLineNo">754</span>      Invariant consequent,<a name="line.754"></a>
+<span class="sourceLineNo">755</span>      boolean iff,<a name="line.755"></a>
+<span class="sourceLineNo">756</span>      Map&lt;Invariant, Invariant&gt; orig_invs) {<a name="line.756"></a>
+<span class="sourceLineNo">757</span>    debug.fine("add_implication " + ppt + " " + predicate + " " + consequent + " " + iff);<a name="line.757"></a>
+<span class="sourceLineNo">758</span><a name="line.758"></a>
+<span class="sourceLineNo">759</span>    assert predicate != null;<a name="line.759"></a>
+<span class="sourceLineNo">760</span>    assert consequent != null;<a name="line.760"></a>
+<span class="sourceLineNo">761</span><a name="line.761"></a>
+<span class="sourceLineNo">762</span>    @SuppressWarnings("nullness") // map: method precondition<a name="line.762"></a>
+<span class="sourceLineNo">763</span>    @NonNull Invariant orig_pred = orig_invs.get(predicate);<a name="line.763"></a>
+<span class="sourceLineNo">764</span>    Invariant orig_cons = orig_invs.get(consequent);<a name="line.764"></a>
+<span class="sourceLineNo">765</span>    if (orig_cons == null) {<a name="line.765"></a>
+<span class="sourceLineNo">766</span>      assert (consequent instanceof DummyInvariant);<a name="line.766"></a>
+<span class="sourceLineNo">767</span>      orig_cons = consequent;<a name="line.767"></a>
+<span class="sourceLineNo">768</span>    }<a name="line.768"></a>
+<span class="sourceLineNo">769</span>    assert orig_pred != null : "predicate is not in orig_invs: " + predicate;<a name="line.769"></a>
+<span class="sourceLineNo">770</span>    assert orig_cons != null;<a name="line.770"></a>
+<span class="sourceLineNo">771</span><a name="line.771"></a>
+<span class="sourceLineNo">772</span>    // Don't add consequents that are obvious or suppressed.<a name="line.772"></a>
+<span class="sourceLineNo">773</span>    // JHP: Jan 2005: It might be better to create them anyway and<a name="line.773"></a>
+<span class="sourceLineNo">774</span>    // only suppress them in printing.  Also, this could possibly be<a name="line.774"></a>
+<span class="sourceLineNo">775</span>    // better implemented by changing the way that we create the list<a name="line.775"></a>
+<span class="sourceLineNo">776</span>    // of invariants that is in one conditional and not in the other<a name="line.776"></a>
+<span class="sourceLineNo">777</span>    // to not include an invariant if it is suppressed on the other<a name="line.777"></a>
+<span class="sourceLineNo">778</span>    // side.  This would have the pleasant side effect of not forcing<a name="line.778"></a>
+<span class="sourceLineNo">779</span>    // all of the suppressed invariants to be created before<a name="line.779"></a>
+<span class="sourceLineNo">780</span>    // determining implications.<a name="line.780"></a>
+<span class="sourceLineNo">781</span>    if (orig_cons.isObvious() != null) {<a name="line.781"></a>
+<span class="sourceLineNo">782</span>      debug.fine("add_implication obvious: " + orig_cons.isObvious().format());<a name="line.782"></a>
+<span class="sourceLineNo">783</span>      return;<a name="line.783"></a>
+<span class="sourceLineNo">784</span>    }<a name="line.784"></a>
+<span class="sourceLineNo">785</span>    if (orig_cons.is_ni_suppressed()) {<a name="line.785"></a>
+<span class="sourceLineNo">786</span>      debug.fine("add_implication suppressed: " + orig_cons.is_ni_suppressed());<a name="line.786"></a>
+<span class="sourceLineNo">787</span>      return;<a name="line.787"></a>
+<span class="sourceLineNo">788</span>    }<a name="line.788"></a>
+<span class="sourceLineNo">789</span><a name="line.789"></a>
+<span class="sourceLineNo">790</span>    // System.out.println("add_implication:");<a name="line.790"></a>
+<span class="sourceLineNo">791</span>    // System.out.println("  predicate = " + predicate.format());<a name="line.791"></a>
+<span class="sourceLineNo">792</span>    // System.out.println("  consequent= " + consequent.format());<a name="line.792"></a>
+<span class="sourceLineNo">793</span>    // System.out.println("  orig_pred = " + orig_pred.format());<a name="line.793"></a>
+<span class="sourceLineNo">794</span>    // System.out.println("  orig_cons = " + orig_cons.format());<a name="line.794"></a>
+<span class="sourceLineNo">795</span><a name="line.795"></a>
+<span class="sourceLineNo">796</span>    if (dkconfig_split_bi_implications &amp;&amp; iff) {<a name="line.796"></a>
+<span class="sourceLineNo">797</span>      Implication imp =<a name="line.797"></a>
+<span class="sourceLineNo">798</span>          Implication.makeImplication(ppt, predicate, consequent, false, orig_pred, orig_cons);<a name="line.798"></a>
+<span class="sourceLineNo">799</span>      if (imp != null) ppt.joiner_view.addInvariant(imp);<a name="line.799"></a>
+<span class="sourceLineNo">800</span>      imp = Implication.makeImplication(ppt, consequent, predicate, false, orig_cons, orig_pred);<a name="line.800"></a>
+<span class="sourceLineNo">801</span>      if (imp != null) {<a name="line.801"></a>
+<span class="sourceLineNo">802</span>        ppt.joiner_view.addInvariant(imp);<a name="line.802"></a>
+<span class="sourceLineNo">803</span>      }<a name="line.803"></a>
+<span class="sourceLineNo">804</span><a name="line.804"></a>
+<span class="sourceLineNo">805</span>      return;<a name="line.805"></a>
+<span class="sourceLineNo">806</span>    }<a name="line.806"></a>
+<span class="sourceLineNo">807</span><a name="line.807"></a>
+<span class="sourceLineNo">808</span>    Implication imp =<a name="line.808"></a>
+<span class="sourceLineNo">809</span>        Implication.makeImplication(ppt, predicate, consequent, iff, orig_pred, orig_cons);<a name="line.809"></a>
+<span class="sourceLineNo">810</span>    if (imp == null) {<a name="line.810"></a>
+<span class="sourceLineNo">811</span>      // The predicate is the same as the consequent, or the implication<a name="line.811"></a>
+<span class="sourceLineNo">812</span>      // already exists.<a name="line.812"></a>
+<span class="sourceLineNo">813</span>      debug.fine("add_implication imp == null");<a name="line.813"></a>
+<span class="sourceLineNo">814</span>      return;<a name="line.814"></a>
+<span class="sourceLineNo">815</span>    }<a name="line.815"></a>
+<span class="sourceLineNo">816</span><a name="line.816"></a>
+<span class="sourceLineNo">817</span>    ppt.joiner_view.addInvariant(imp);<a name="line.817"></a>
+<span class="sourceLineNo">818</span>  }<a name="line.818"></a>
+<span class="sourceLineNo">819</span><a name="line.819"></a>
+<span class="sourceLineNo">820</span>  /**<a name="line.820"></a>
+<span class="sourceLineNo">821</span>   * Adds the specified relation from each conditional ppt in this to the corresponding conditional<a name="line.821"></a>
+<span class="sourceLineNo">822</span>   * ppt in ppt_split. The relation specified should be a relation from this.parent to<a name="line.822"></a>
+<span class="sourceLineNo">823</span>   * ppt_split.parent.<a name="line.823"></a>
+<span class="sourceLineNo">824</span>   *<a name="line.824"></a>
+<span class="sourceLineNo">825</span>   * @param rel the relation to add<a name="line.825"></a>
+<span class="sourceLineNo">826</span>   * @param ppt_split the target of the relation; that is, the relation goes from {@code this} to<a name="line.826"></a>
+<span class="sourceLineNo">827</span>   *     {@code ppt_split}<a name="line.827"></a>
+<span class="sourceLineNo">828</span>   */<a name="line.828"></a>
+<span class="sourceLineNo">829</span>  public void add_relation(PptRelation rel, PptSplitter ppt_split) {<a name="line.829"></a>
+<span class="sourceLineNo">830</span>    for (int ii = 0; ii &lt; ppts.length; ii++) {<a name="line.830"></a>
+<span class="sourceLineNo">831</span>      @SuppressWarnings("UnusedVariable")<a name="line.831"></a>
+<span class="sourceLineNo">832</span>      PptRelation cond_rel = rel.copy(ppts[ii], ppt_split.ppts[ii]);<a name="line.832"></a>
+<span class="sourceLineNo">833</span>      // System.out.println ("Added relation: " + cond_rel);<a name="line.833"></a>
+<span class="sourceLineNo">834</span>      // System.out.println ("with relations: "<a name="line.834"></a>
+<span class="sourceLineNo">835</span>      //                      + cond_rel.parent_to_child_var_string());<a name="line.835"></a>
+<span class="sourceLineNo">836</span>    }<a name="line.836"></a>
+<span class="sourceLineNo">837</span>  }<a name="line.837"></a>
+<span class="sourceLineNo">838</span><a name="line.838"></a>
+<span class="sourceLineNo">839</span>  /**<a name="line.839"></a>
+<span class="sourceLineNo">840</span>   * Returns the VarInfo in ppt1 that matches the specified VarInfo. The variables at each point<a name="line.840"></a>
+<span class="sourceLineNo">841</span>   * must match exactly. This is a reasonable assumption for the ppts in PptSplitter and their<a name="line.841"></a>
+<span class="sourceLineNo">842</span>   * parent.<a name="line.842"></a>
+<span class="sourceLineNo">843</span>   *<a name="line.843"></a>
+<span class="sourceLineNo">844</span>   * @param ppt1 a program point<a name="line.844"></a>
+<span class="sourceLineNo">845</span>   * @param ppt2_var a variable from a different program point<a name="line.845"></a>
+<span class="sourceLineNo">846</span>   */<a name="line.846"></a>
+<span class="sourceLineNo">847</span>  private VarInfo matching_var(PptTopLevel ppt1, VarInfo ppt2_var) {<a name="line.847"></a>
+<span class="sourceLineNo">848</span>    VarInfo v = ppt1.var_infos[ppt2_var.varinfo_index];<a name="line.848"></a>
+<span class="sourceLineNo">849</span>    assert v.name().equals(ppt2_var.name());<a name="line.849"></a>
+<span class="sourceLineNo">850</span>    return v;<a name="line.850"></a>
+<span class="sourceLineNo">851</span>  }<a name="line.851"></a>
+<span class="sourceLineNo">852</span><a name="line.852"></a>
+<span class="sourceLineNo">853</span>  @SideEffectFree<a name="line.853"></a>
+<span class="sourceLineNo">854</span>  @Override<a name="line.854"></a>
+<span class="sourceLineNo">855</span>  public String toString(@GuardSatisfied PptSplitter this) {<a name="line.855"></a>
+<span class="sourceLineNo">856</span>    return "Splitter " + splitter + ": ppt1 " + ppts[0].name() + ": ppt2 " + ppts[1].name;<a name="line.856"></a>
+<span class="sourceLineNo">857</span>  }<a name="line.857"></a>
+<span class="sourceLineNo">858</span>}<a name="line.858"></a>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</pre>
+</div>
+</body>
+</html>

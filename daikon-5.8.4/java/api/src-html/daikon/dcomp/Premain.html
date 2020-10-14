@@ -1,0 +1,530 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<html lang="en">
+<head><link rel="icon" href="../../../daikon-favicon.png" type="image/png"/>
+<title>Source code</title>
+<link rel="stylesheet" type="text/css" href="../../../stylesheet.css" title="Style">
+</head>
+<body>
+<div class="sourceContainer">
+<pre><span class="sourceLineNo">001</span>package daikon.dcomp;<a name="line.1"></a>
+<span class="sourceLineNo">002</span><a name="line.2"></a>
+<span class="sourceLineNo">003</span>import static java.nio.charset.StandardCharsets.UTF_8;<a name="line.3"></a>
+<span class="sourceLineNo">004</span><a name="line.4"></a>
+<span class="sourceLineNo">005</span>import daikon.DynComp;<a name="line.5"></a>
+<span class="sourceLineNo">006</span>import daikon.chicory.DaikonVariableInfo;<a name="line.6"></a>
+<span class="sourceLineNo">007</span>import daikon.plumelib.bcelutil.BcelUtil;<a name="line.7"></a>
+<span class="sourceLineNo">008</span>import daikon.plumelib.options.Option;<a name="line.8"></a>
+<span class="sourceLineNo">009</span>import daikon.plumelib.options.Options;<a name="line.9"></a>
+<span class="sourceLineNo">010</span>import java.io.BufferedReader;<a name="line.10"></a>
+<span class="sourceLineNo">011</span>import java.io.File;<a name="line.11"></a>
+<span class="sourceLineNo">012</span>import java.io.IOException;<a name="line.12"></a>
+<span class="sourceLineNo">013</span>import java.io.InputStream;<a name="line.13"></a>
+<span class="sourceLineNo">014</span>import java.io.InputStreamReader;<a name="line.14"></a>
+<span class="sourceLineNo">015</span>import java.io.PrintWriter;<a name="line.15"></a>
+<span class="sourceLineNo">016</span>import java.lang.instrument.ClassFileTransformer;<a name="line.16"></a>
+<span class="sourceLineNo">017</span>import java.lang.instrument.Instrumentation;<a name="line.17"></a>
+<span class="sourceLineNo">018</span>import java.nio.file.Files;<a name="line.18"></a>
+<span class="sourceLineNo">019</span>import java.util.ArrayList;<a name="line.19"></a>
+<span class="sourceLineNo">020</span>import java.util.Arrays;<a name="line.20"></a>
+<span class="sourceLineNo">021</span>import java.util.HashSet;<a name="line.21"></a>
+<span class="sourceLineNo">022</span>import java.util.Set;<a name="line.22"></a>
+<span class="sourceLineNo">023</span>import java.util.concurrent.TimeUnit;<a name="line.23"></a>
+<span class="sourceLineNo">024</span>import org.apache.bcel.*;<a name="line.24"></a>
+<span class="sourceLineNo">025</span>import org.apache.bcel.classfile.*;<a name="line.25"></a>
+<span class="sourceLineNo">026</span>import org.apache.bcel.generic.*;<a name="line.26"></a>
+<span class="sourceLineNo">027</span><a name="line.27"></a>
+<span class="sourceLineNo">028</span>/**<a name="line.28"></a>
+<span class="sourceLineNo">029</span> * This class is the entry point for the DynComp instrumentation agent. It is the only code in<a name="line.29"></a>
+<span class="sourceLineNo">030</span> * dcomp_premain.jar.<a name="line.30"></a>
+<span class="sourceLineNo">031</span> */<a name="line.31"></a>
+<span class="sourceLineNo">032</span>public class Premain {<a name="line.32"></a>
+<span class="sourceLineNo">033</span><a name="line.33"></a>
+<span class="sourceLineNo">034</span>  // These command-line options cannot be accessed from DynComp.  These are internal debugging<a name="line.34"></a>
+<span class="sourceLineNo">035</span>  // options that may be used when Premain is invoked directly from the command line.<a name="line.35"></a>
+<span class="sourceLineNo">036</span><a name="line.36"></a>
+<span class="sourceLineNo">037</span>  /** Turn on basic DCInstrument debugging options. */<a name="line.37"></a>
+<span class="sourceLineNo">038</span>  @Option("Turn on basic DCInstrument debugging options")<a name="line.38"></a>
+<span class="sourceLineNo">039</span>  public static boolean debug_dcinstrument = false;<a name="line.39"></a>
+<span class="sourceLineNo">040</span><a name="line.40"></a>
+<span class="sourceLineNo">041</span>  /** Turn on basic DCRuntime debugging options. */<a name="line.41"></a>
+<span class="sourceLineNo">042</span>  @Option("Turn on basic DCRuntime debugging options")<a name="line.42"></a>
+<span class="sourceLineNo">043</span>  public static boolean debug_dcruntime = false;<a name="line.43"></a>
+<span class="sourceLineNo">044</span><a name="line.44"></a>
+<span class="sourceLineNo">045</span>  /** Turn on most DCRuntime debugging options. */<a name="line.45"></a>
+<span class="sourceLineNo">046</span>  @Option("Turn on most DCRuntime debugging options")<a name="line.46"></a>
+<span class="sourceLineNo">047</span>  public static boolean debug_dcruntime_all = false;<a name="line.47"></a>
+<span class="sourceLineNo">048</span><a name="line.48"></a>
+<span class="sourceLineNo">049</span>  /** Set of pre-instrumented JDK classes. */<a name="line.49"></a>
+<span class="sourceLineNo">050</span>  protected static Set&lt;String&gt; pre_instrumented = new HashSet&lt;&gt;();<a name="line.50"></a>
+<span class="sourceLineNo">051</span><a name="line.51"></a>
+<span class="sourceLineNo">052</span>  /** Set of packages known to cause problems when instrumented. */<a name="line.52"></a>
+<span class="sourceLineNo">053</span>  protected static Set&lt;String&gt; problem_packages =<a name="line.53"></a>
+<span class="sourceLineNo">054</span>      new HashSet&lt;&gt;(<a name="line.54"></a>
+<span class="sourceLineNo">055</span>          Arrays.asList(<a name="line.55"></a>
+<span class="sourceLineNo">056</span>              // Packages to support reflection and Lambda expressions cause instrumentation<a name="line.56"></a>
+<span class="sourceLineNo">057</span>              // problems and probably don't affect user program comparability values.<a name="line.57"></a>
+<span class="sourceLineNo">058</span>              "java.lang.invoke", "java.lang.reflect", "jdk.internal.reflect"));<a name="line.58"></a>
+<span class="sourceLineNo">059</span><a name="line.59"></a>
+<span class="sourceLineNo">060</span>  /** Set of classes known to cause problems when instrumented. */<a name="line.60"></a>
+<span class="sourceLineNo">061</span>  protected static Set&lt;String&gt; problem_classes =<a name="line.61"></a>
+<span class="sourceLineNo">062</span>      new HashSet&lt;&gt;(<a name="line.62"></a>
+<span class="sourceLineNo">063</span>          Arrays.asList(<a name="line.63"></a>
+<span class="sourceLineNo">064</span>              // Interfaces marked @FunctionalInterface should not be instrumented<a name="line.64"></a>
+<span class="sourceLineNo">065</span>              // as they are used by LambdaExpressions.  Since BCEL won't let us<a name="line.65"></a>
+<span class="sourceLineNo">066</span>              // inspect the annotations, we must manually add to problem classes.<a name="line.66"></a>
+<span class="sourceLineNo">067</span>              "java.util.regex.Pattern$CharPredicate",<a name="line.67"></a>
+<span class="sourceLineNo">068</span>              // &lt;clinit&gt; gets a JNI error during initialization.<a name="line.68"></a>
+<span class="sourceLineNo">069</span>              "java.lang.StackTraceElement$HashedModules"));<a name="line.69"></a>
+<span class="sourceLineNo">070</span><a name="line.70"></a>
+<span class="sourceLineNo">071</span>  /** Set of methods known to cause problems when instrumented. */<a name="line.71"></a>
+<span class="sourceLineNo">072</span>  protected static Set&lt;String&gt; problem_methods =<a name="line.72"></a>
+<span class="sourceLineNo">073</span>      new HashSet&lt;&gt;(<a name="line.73"></a>
+<span class="sourceLineNo">074</span>          Arrays.asList(<a name="line.74"></a>
+<span class="sourceLineNo">075</span>              // The following methods call sun.reflect.Reflection.getCallerClass().<a name="line.75"></a>
+<span class="sourceLineNo">076</span>              // These methods are annotated with @CallerSensitive to<a name="line.76"></a>
+<span class="sourceLineNo">077</span>              // indicate 'skip me when looking at call stack'.<a name="line.77"></a>
+<span class="sourceLineNo">078</span>              // When we create the instrumented version of these methods we<a name="line.78"></a>
+<span class="sourceLineNo">079</span>              // should include this annotation.  However, BCEL does not support<a name="line.79"></a>
+<span class="sourceLineNo">080</span>              // this at this time.  So for now, we do not instrument these methods.<a name="line.80"></a>
+<span class="sourceLineNo">081</span>              // Initially, we just had a couple methods listed, but it turns out<a name="line.81"></a>
+<span class="sourceLineNo">082</span>              // that the junit tool references a large number of these methods.<a name="line.82"></a>
+<span class="sourceLineNo">083</span>              "java.lang.Class.forName",<a name="line.83"></a>
+<span class="sourceLineNo">084</span>              "java.lang.Class.newInstance",<a name="line.84"></a>
+<span class="sourceLineNo">085</span>              "java.lang.Class.getClassLoader",<a name="line.85"></a>
+<span class="sourceLineNo">086</span>              "java.lang.Class.getEnclosingMethod",<a name="line.86"></a>
+<span class="sourceLineNo">087</span>              "java.lang.Class.getDeclaringClass",<a name="line.87"></a>
+<span class="sourceLineNo">088</span>              "java.lang.Class.getEnclosingClass",<a name="line.88"></a>
+<span class="sourceLineNo">089</span>              "java.lang.Class.getClasses",<a name="line.89"></a>
+<span class="sourceLineNo">090</span>              "java.lang.Class.getField",<a name="line.90"></a>
+<span class="sourceLineNo">091</span>              "java.lang.Class.getFields",<a name="line.91"></a>
+<span class="sourceLineNo">092</span>              "java.lang.Class.getMethod",<a name="line.92"></a>
+<span class="sourceLineNo">093</span>              "java.lang.Class.getMethods",<a name="line.93"></a>
+<span class="sourceLineNo">094</span>              "java.lang.Class.getConstructor",<a name="line.94"></a>
+<span class="sourceLineNo">095</span>              "java.lang.Class.getConstructors",<a name="line.95"></a>
+<span class="sourceLineNo">096</span>              "java.lang.Class.getDeclaredClasses",<a name="line.96"></a>
+<span class="sourceLineNo">097</span>              "java.lang.Class.getDeclaredField",<a name="line.97"></a>
+<span class="sourceLineNo">098</span>              "java.lang.Class.getDeclaredFields",<a name="line.98"></a>
+<span class="sourceLineNo">099</span>              "java.lang.Class.getDeclaredMethod",<a name="line.99"></a>
+<span class="sourceLineNo">100</span>              "java.lang.Class.getDeclaredMethods",<a name="line.100"></a>
+<span class="sourceLineNo">101</span>              "java.lang.Class.getDeclaredConstructor",<a name="line.101"></a>
+<span class="sourceLineNo">102</span>              "java.lang.Class.getDeclaredConstructors",<a name="line.102"></a>
+<span class="sourceLineNo">103</span>              "java.util.ResourceBundle.getBundle",<a name="line.103"></a>
+<span class="sourceLineNo">104</span>              "java.util.ResourceBundle.clearCache",<a name="line.104"></a>
+<span class="sourceLineNo">105</span><a name="line.105"></a>
+<span class="sourceLineNo">106</span>              // The below entries are temporary, until the bugs are fixed.<a name="line.106"></a>
+<span class="sourceLineNo">107</span><a name="line.107"></a>
+<span class="sourceLineNo">108</span>              // There is a problem in the instrumented code for DecimalFormat that I have<a name="line.108"></a>
+<span class="sourceLineNo">109</span>              // not been able to debug.  It does not crash, but causes floating point rounding<a name="line.109"></a>
+<span class="sourceLineNo">110</span>              // to return incorrect results.<a name="line.110"></a>
+<span class="sourceLineNo">111</span>              "java.text.DecimalFormat.applyPattern",<a name="line.111"></a>
+<span class="sourceLineNo">112</span>              "java.text.DecimalFormat.format",<a name="line.112"></a>
+<span class="sourceLineNo">113</span>              // There is a problem in the instrumented code for BufferedReader that I have<a name="line.113"></a>
+<span class="sourceLineNo">114</span>              // not been able to debug.  It does not crash, but readLine() will sometimes<a name="line.114"></a>
+<span class="sourceLineNo">115</span>              // trucate the result string.<a name="line.115"></a>
+<span class="sourceLineNo">116</span>              "java.io.BufferedReader.readLine",<a name="line.116"></a>
+<span class="sourceLineNo">117</span>              // There is a problem in the instrumented code for StringBuffer that I have<a name="line.117"></a>
+<span class="sourceLineNo">118</span>              // not been able to debug.  It does not crash, but toString() will sometimes<a name="line.118"></a>
+<span class="sourceLineNo">119</span>              // return an empty string.<a name="line.119"></a>
+<span class="sourceLineNo">120</span>              "java.lang.StringBuffer.append",<a name="line.120"></a>
+<span class="sourceLineNo">121</span>              "java.lang.StringBuffer.toString"));<a name="line.121"></a>
+<span class="sourceLineNo">122</span><a name="line.122"></a>
+<span class="sourceLineNo">123</span>  /**<a name="line.123"></a>
+<span class="sourceLineNo">124</span>   * One of the last phases for DynComp is to write out the comparability values after the user<a name="line.124"></a>
+<span class="sourceLineNo">125</span>   * program completes execution. One of the steps is to assign values to the arguments of methods<a name="line.125"></a>
+<span class="sourceLineNo">126</span>   * that have not been executed. We use reflection to get type information about these arguments,<a name="line.126"></a>
+<span class="sourceLineNo">127</span>   * which causes the method to be loaded; which causes the main part of DynComp to try to<a name="line.127"></a>
+<span class="sourceLineNo">128</span>   * instrument the method. As the user program has completed execution, doing instrumentation at<a name="line.128"></a>
+<span class="sourceLineNo">129</span>   * this point can lead to problems. The correct fix for this problem is to use BCEL to get the<a name="line.129"></a>
+<span class="sourceLineNo">130</span>   * type information instead of reflection, thus avoiding loading the method into the JVM. This<a name="line.130"></a>
+<span class="sourceLineNo">131</span>   * will be a large change, so a temporary fix is to indicate if the program is in shutdown mode<a name="line.131"></a>
+<span class="sourceLineNo">132</span>   * and not instrument any methods when this flag is true. TODO: Couldn't we just call<a name="line.132"></a>
+<span class="sourceLineNo">133</span>   * removeTransformer at the start of shutdown?<a name="line.133"></a>
+<span class="sourceLineNo">134</span>   */<a name="line.134"></a>
+<span class="sourceLineNo">135</span>  protected static boolean in_shutdown = false;<a name="line.135"></a>
+<span class="sourceLineNo">136</span><a name="line.136"></a>
+<span class="sourceLineNo">137</span>  /** Flag to indicate if we are retransforming a previously loaded class. */<a name="line.137"></a>
+<span class="sourceLineNo">138</span>  protected static boolean retransform_preloads;<a name="line.138"></a>
+<span class="sourceLineNo">139</span><a name="line.139"></a>
+<span class="sourceLineNo">140</span>  /** Keep track of classes that have already been retransformed. */<a name="line.140"></a>
+<span class="sourceLineNo">141</span>  private static Set&lt;Class&lt;?&gt;&gt; previously_processed_classes = new HashSet&lt;&gt;();<a name="line.141"></a>
+<span class="sourceLineNo">142</span><a name="line.142"></a>
+<span class="sourceLineNo">143</span>  // For debugging<a name="line.143"></a>
+<span class="sourceLineNo">144</span>  // protected static Instrumentation instr;<a name="line.144"></a>
+<span class="sourceLineNo">145</span><a name="line.145"></a>
+<span class="sourceLineNo">146</span>  /**<a name="line.146"></a>
+<span class="sourceLineNo">147</span>   * This method is the entry point of the java agent. Its main purpose is to set up the transformer<a name="line.147"></a>
+<span class="sourceLineNo">148</span>   * so that when classes from the target app are loaded, they are first transformed in order to add<a name="line.148"></a>
+<span class="sourceLineNo">149</span>   * comparability instrumentation.<a name="line.149"></a>
+<span class="sourceLineNo">150</span>   *<a name="line.150"></a>
+<span class="sourceLineNo">151</span>   * &lt;p&gt;If this code is running on Java 9+ and jdk_instrumented is true it also retransforms any JDK<a name="line.151"></a>
+<span class="sourceLineNo">152</span>   * methods that were loaded prior to premain getting control.<a name="line.152"></a>
+<span class="sourceLineNo">153</span>   *<a name="line.153"></a>
+<span class="sourceLineNo">154</span>   * @param agentArgs string containing the arguments passed to this agent<a name="line.154"></a>
+<span class="sourceLineNo">155</span>   * @param inst instrumentation instance to be used to transform classes<a name="line.155"></a>
+<span class="sourceLineNo">156</span>   * @throws IOException if jdk_classes.txt cannot be read or if the correct version of BCEL cannot<a name="line.156"></a>
+<span class="sourceLineNo">157</span>   *     be found or loaded<a name="line.157"></a>
+<span class="sourceLineNo">158</span>   */<a name="line.158"></a>
+<span class="sourceLineNo">159</span>  public static void premain(String agentArgs, Instrumentation inst) throws IOException {<a name="line.159"></a>
+<span class="sourceLineNo">160</span>    // For debugging<a name="line.160"></a>
+<span class="sourceLineNo">161</span>    // this.instr = inst;<a name="line.161"></a>
+<span class="sourceLineNo">162</span><a name="line.162"></a>
+<span class="sourceLineNo">163</span>    // Because DynComp started Premain in a separate process, we must rescan<a name="line.163"></a>
+<span class="sourceLineNo">164</span>    // the options to set up the DynComp static variables.<a name="line.164"></a>
+<span class="sourceLineNo">165</span>    Options options = new Options(DynComp.synopsis, DynComp.class, Premain.class);<a name="line.165"></a>
+<span class="sourceLineNo">166</span>    String[] args = options.parse(true, agentArgs.split("  *"));<a name="line.166"></a>
+<span class="sourceLineNo">167</span>    if (args.length &gt; 0) {<a name="line.167"></a>
+<span class="sourceLineNo">168</span>      System.err.printf("Unexpected arguments %s%n", Arrays.toString(args));<a name="line.168"></a>
+<span class="sourceLineNo">169</span>      options.printUsage();<a name="line.169"></a>
+<span class="sourceLineNo">170</span>      System.exit(-1);<a name="line.170"></a>
+<span class="sourceLineNo">171</span>    }<a name="line.171"></a>
+<span class="sourceLineNo">172</span>    if (DynComp.rt_file != null &amp;&amp; DynComp.rt_file.getName().equalsIgnoreCase("NONE")) {<a name="line.172"></a>
+<span class="sourceLineNo">173</span>      DynComp.no_jdk = true;<a name="line.173"></a>
+<span class="sourceLineNo">174</span>      DynComp.rt_file = null;<a name="line.174"></a>
+<span class="sourceLineNo">175</span>    }<a name="line.175"></a>
+<span class="sourceLineNo">176</span><a name="line.176"></a>
+<span class="sourceLineNo">177</span>    // Note that the following references to static fields have an important<a name="line.177"></a>
+<span class="sourceLineNo">178</span>    // side effect: They cause the corresponding class to be loaded. This helps<a name="line.178"></a>
+<span class="sourceLineNo">179</span>    // Instrument.transform() avoid ClassCircularityErrors during initialization.<a name="line.179"></a>
+<span class="sourceLineNo">180</span>    DaikonVariableInfo.std_visibility = DynComp.std_visibility;<a name="line.180"></a>
+<span class="sourceLineNo">181</span>    DCRuntime.depth = DynComp.nesting_depth;<a name="line.181"></a>
+<span class="sourceLineNo">182</span>    DCInstrument.jdk_instrumented = !DynComp.no_jdk;<a name="line.182"></a>
+<span class="sourceLineNo">183</span>    @SuppressWarnings("UnusedVariable") // loads the BcelUtil class; otherwise, Premain gives errors<a name="line.183"></a>
+<span class="sourceLineNo">184</span>    int junk = BcelUtil.javaVersion;<a name="line.184"></a>
+<span class="sourceLineNo">185</span><a name="line.185"></a>
+<span class="sourceLineNo">186</span>    // Another 'trick' to force needed classes to be loaded prior to retransformation.<a name="line.186"></a>
+<span class="sourceLineNo">187</span>    String buffer =<a name="line.187"></a>
+<span class="sourceLineNo">188</span>        String.format("In dcomp premain, agentargs ='%s', Instrumentation = '%s'", agentArgs, inst);<a name="line.188"></a>
+<span class="sourceLineNo">189</span>    if (DynComp.verbose) {<a name="line.189"></a>
+<span class="sourceLineNo">190</span>      System.out.println(buffer);<a name="line.190"></a>
+<span class="sourceLineNo">191</span>      System.out.printf("Options settings: %n%s%n", options.settings());<a name="line.191"></a>
+<span class="sourceLineNo">192</span>    }<a name="line.192"></a>
+<span class="sourceLineNo">193</span><a name="line.193"></a>
+<span class="sourceLineNo">194</span>    // Read the list of pre-instrumented classes.<a name="line.194"></a>
+<span class="sourceLineNo">195</span>    if (DCInstrument.jdk_instrumented) {<a name="line.195"></a>
+<span class="sourceLineNo">196</span>      // location is: daikon/java/dcomp-rt/java/lang/jdk_classes.txt .<a name="line.196"></a>
+<span class="sourceLineNo">197</span>      InputStream strm = Object.class.getResourceAsStream("jdk_classes.txt");<a name="line.197"></a>
+<span class="sourceLineNo">198</span>      if (strm == null) {<a name="line.198"></a>
+<span class="sourceLineNo">199</span>        System.err.println(<a name="line.199"></a>
+<span class="sourceLineNo">200</span>            "Can't find jdk_classes.txt; see Daikon manual, section \"Instrumenting the JDK with DynComp\"");<a name="line.200"></a>
+<span class="sourceLineNo">201</span>        System.exit(1);<a name="line.201"></a>
+<span class="sourceLineNo">202</span>      }<a name="line.202"></a>
+<span class="sourceLineNo">203</span>      BufferedReader reader = new BufferedReader(new InputStreamReader(strm, UTF_8));<a name="line.203"></a>
+<span class="sourceLineNo">204</span><a name="line.204"></a>
+<span class="sourceLineNo">205</span>      // Verify that the current no-primitives flag setting matches the setting used to<a name="line.205"></a>
+<span class="sourceLineNo">206</span>      // generate dcomp_rt.jar (via the BuildJDK tool).<a name="line.206"></a>
+<span class="sourceLineNo">207</span>      String noPrimitivesLine = reader.readLine();<a name="line.207"></a>
+<span class="sourceLineNo">208</span>      if (noPrimitivesLine == null) {<a name="line.208"></a>
+<span class="sourceLineNo">209</span>        System.err.println("jdk_classes.txt is an empty file.");<a name="line.209"></a>
+<span class="sourceLineNo">210</span>        System.exit(1);<a name="line.210"></a>
+<span class="sourceLineNo">211</span>      }<a name="line.211"></a>
+<span class="sourceLineNo">212</span>      noPrimitivesLine = noPrimitivesLine.trim();<a name="line.212"></a>
+<span class="sourceLineNo">213</span>      if (!noPrimitivesLine.startsWith("no_primitives: ")) {<a name="line.213"></a>
+<span class="sourceLineNo">214</span>        System.err.println("First line of jdk_classes.txt does not contain no_primitives flag.");<a name="line.214"></a>
+<span class="sourceLineNo">215</span>        System.exit(1);<a name="line.215"></a>
+<span class="sourceLineNo">216</span>      }<a name="line.216"></a>
+<span class="sourceLineNo">217</span>      if (DynComp.no_primitives != noPrimitivesLine.equalsIgnoreCase("no_primitives: true")) {<a name="line.217"></a>
+<span class="sourceLineNo">218</span>        System.err.println(<a name="line.218"></a>
+<span class="sourceLineNo">219</span>            "no-primitives flag does not match setting used to generate dcomp_rt.jar.");<a name="line.219"></a>
+<span class="sourceLineNo">220</span>        System.exit(1);<a name="line.220"></a>
+<span class="sourceLineNo">221</span>      }<a name="line.221"></a>
+<span class="sourceLineNo">222</span><a name="line.222"></a>
+<span class="sourceLineNo">223</span>      // Read in the list of pre-instrumented classes<a name="line.223"></a>
+<span class="sourceLineNo">224</span>      while (true) {<a name="line.224"></a>
+<span class="sourceLineNo">225</span>        String line = reader.readLine();<a name="line.225"></a>
+<span class="sourceLineNo">226</span>        if (line == null) {<a name="line.226"></a>
+<span class="sourceLineNo">227</span>          break;<a name="line.227"></a>
+<span class="sourceLineNo">228</span>        }<a name="line.228"></a>
+<span class="sourceLineNo">229</span>        // System.out.printf("adding '%s'%n", line);<a name="line.229"></a>
+<span class="sourceLineNo">230</span>        pre_instrumented.add(line);<a name="line.230"></a>
+<span class="sourceLineNo">231</span>      }<a name="line.231"></a>
+<span class="sourceLineNo">232</span>    }<a name="line.232"></a>
+<span class="sourceLineNo">233</span><a name="line.233"></a>
+<span class="sourceLineNo">234</span>    // Setup the shutdown hook<a name="line.234"></a>
+<span class="sourceLineNo">235</span>    Thread shutdown_thread = new ShutdownThread();<a name="line.235"></a>
+<span class="sourceLineNo">236</span>    java.lang.Runtime.getRuntime().addShutdownHook(shutdown_thread);<a name="line.236"></a>
+<span class="sourceLineNo">237</span><a name="line.237"></a>
+<span class="sourceLineNo">238</span>    // Setup the transformer<a name="line.238"></a>
+<span class="sourceLineNo">239</span>    ClassFileTransformer transformer;<a name="line.239"></a>
+<span class="sourceLineNo">240</span>    // use a special classloader to ensure correct version of BCEL is used<a name="line.240"></a>
+<span class="sourceLineNo">241</span>    ClassLoader loader = new daikon.chicory.ChicoryPremain.ChicoryLoader();<a name="line.241"></a>
+<span class="sourceLineNo">242</span>    try {<a name="line.242"></a>
+<span class="sourceLineNo">243</span>      transformer =<a name="line.243"></a>
+<span class="sourceLineNo">244</span>          (ClassFileTransformer)<a name="line.244"></a>
+<span class="sourceLineNo">245</span>              loader.loadClass("daikon.dcomp.Instrument").getDeclaredConstructor().newInstance();<a name="line.245"></a>
+<span class="sourceLineNo">246</span>    } catch (Exception e) {<a name="line.246"></a>
+<span class="sourceLineNo">247</span>      throw new RuntimeException("Unexpected error loading Instrument", e);<a name="line.247"></a>
+<span class="sourceLineNo">248</span>    }<a name="line.248"></a>
+<span class="sourceLineNo">249</span>    if (DynComp.verbose) {<a name="line.249"></a>
+<span class="sourceLineNo">250</span>      System.out.printf(<a name="line.250"></a>
+<span class="sourceLineNo">251</span>          "Classloader of tranformer = %s%n", transformer.getClass().getClassLoader());<a name="line.251"></a>
+<span class="sourceLineNo">252</span>    }<a name="line.252"></a>
+<span class="sourceLineNo">253</span><a name="line.253"></a>
+<span class="sourceLineNo">254</span>    // Check that we got a newer version of BCEL that includes JDK 11 support. At present,<a name="line.254"></a>
+<span class="sourceLineNo">255</span>    // this is only the PLSE 6.4.1.1 release version.  We can verify this version by the<a name="line.255"></a>
+<span class="sourceLineNo">256</span>    // presence of the method FieldGenOrMethodGen.removeAnnotationEntries().<a name="line.256"></a>
+<span class="sourceLineNo">257</span>    try {<a name="line.257"></a>
+<span class="sourceLineNo">258</span>      Class&lt;?&gt; c = loader.loadClass("org.apache.bcel.generic.FieldGenOrMethodGen");<a name="line.258"></a>
+<span class="sourceLineNo">259</span>      c.getMethod("removeAnnotationEntries", (Class&lt;?&gt;[]) null);<a name="line.259"></a>
+<span class="sourceLineNo">260</span>    } catch (Exception e) {<a name="line.260"></a>
+<span class="sourceLineNo">261</span>      System.err.printf("%nBCEL jar found is not the version included with the Daikon release.%n");<a name="line.261"></a>
+<span class="sourceLineNo">262</span>      System.exit(1);<a name="line.262"></a>
+<span class="sourceLineNo">263</span>    }<a name="line.263"></a>
+<span class="sourceLineNo">264</span><a name="line.264"></a>
+<span class="sourceLineNo">265</span>    // now turn on instrumentation<a name="line.265"></a>
+<span class="sourceLineNo">266</span>    if (DynComp.verbose) {<a name="line.266"></a>
+<span class="sourceLineNo">267</span>      System.out.println("call addTransformer");<a name="line.267"></a>
+<span class="sourceLineNo">268</span>    }<a name="line.268"></a>
+<span class="sourceLineNo">269</span>    inst.addTransformer(transformer, true);<a name="line.269"></a>
+<span class="sourceLineNo">270</span><a name="line.270"></a>
+<span class="sourceLineNo">271</span>    // For Java 9+ we only partially instrument the JDK as part of building DynComp.<a name="line.271"></a>
+<span class="sourceLineNo">272</span>    // We complete the instrumentation when a JDK class is loaded during program execution.<a name="line.272"></a>
+<span class="sourceLineNo">273</span>    // However, there is Catch-22: "All future class definitions will be seen by the transformer,<a name="line.273"></a>
+<span class="sourceLineNo">274</span>    // except definitions of classes upon which any registered transformer is dependent"<a name="line.274"></a>
+<span class="sourceLineNo">275</span>    // (from the documentation for Instrumentation.addTransformer()).<a name="line.275"></a>
+<span class="sourceLineNo">276</span>    // Thus a JDK class used by DynComp will not be seen by our transformer.  To get around this<a name="line.276"></a>
+<span class="sourceLineNo">277</span>    // we get the list of all the classes already loaded and call retransformClasses on them.<a name="line.277"></a>
+<span class="sourceLineNo">278</span>    // Unfortunately, this process may need to be repeated multiple times as each time we call<a name="line.278"></a>
+<span class="sourceLineNo">279</span>    // retransform on a class it may require the use of a previously unexecuted part of DynComp<a name="line.279"></a>
+<span class="sourceLineNo">280</span>    // which may, in turn, cause more JDK classes to be loaded without our knowledge.<a name="line.280"></a>
+<span class="sourceLineNo">281</span>    //<a name="line.281"></a>
+<span class="sourceLineNo">282</span>    // Possibility:<a name="line.282"></a>
+<span class="sourceLineNo">283</span>    // There may be a way to use the JDeps tool to get a list of all the dependencies as part of<a name="line.283"></a>
+<span class="sourceLineNo">284</span>    // the DynComp build process and then pass this list to Premain for processing.<a name="line.284"></a>
+<span class="sourceLineNo">285</span>    //<a name="line.285"></a>
+<span class="sourceLineNo">286</span>    // Future work:<a name="line.286"></a>
+<span class="sourceLineNo">287</span>    // We should revisit the problems associated with pre-instrumenting the JDK via BuildJDK.<a name="line.287"></a>
+<span class="sourceLineNo">288</span>    // The current system has a noticeable performance hit at startup in addition to the<a name="line.288"></a>
+<span class="sourceLineNo">289</span>    // retransformation complications noted above.<a name="line.289"></a>
+<span class="sourceLineNo">290</span>    //<a name="line.290"></a>
+<span class="sourceLineNo">291</span>    if (BcelUtil.javaVersion &gt; 8 &amp;&amp; DCInstrument.jdk_instrumented) {<a name="line.291"></a>
+<span class="sourceLineNo">292</span><a name="line.292"></a>
+<span class="sourceLineNo">293</span>      retransform_preloads = true;<a name="line.293"></a>
+<span class="sourceLineNo">294</span>      Class&lt;?&gt;[] classes_to_retransform = get_retransform_list(inst);<a name="line.294"></a>
+<span class="sourceLineNo">295</span><a name="line.295"></a>
+<span class="sourceLineNo">296</span>      while (classes_to_retransform.length &gt; 0) {<a name="line.296"></a>
+<span class="sourceLineNo">297</span>        if (DynComp.verbose) {<a name="line.297"></a>
+<span class="sourceLineNo">298</span>          System.out.println("call retransformClasses");<a name="line.298"></a>
+<span class="sourceLineNo">299</span>        }<a name="line.299"></a>
+<span class="sourceLineNo">300</span>        try {<a name="line.300"></a>
+<span class="sourceLineNo">301</span>          inst.retransformClasses(classes_to_retransform);<a name="line.301"></a>
+<span class="sourceLineNo">302</span>        } catch (Exception e) {<a name="line.302"></a>
+<span class="sourceLineNo">303</span>          System.err.println("Unable to retransformClasses.");<a name="line.303"></a>
+<span class="sourceLineNo">304</span>          System.err.println(e);<a name="line.304"></a>
+<span class="sourceLineNo">305</span>        }<a name="line.305"></a>
+<span class="sourceLineNo">306</span>        classes_to_retransform = get_retransform_list(inst);<a name="line.306"></a>
+<span class="sourceLineNo">307</span>      }<a name="line.307"></a>
+<span class="sourceLineNo">308</span>    }<a name="line.308"></a>
+<span class="sourceLineNo">309</span>    retransform_preloads = false;<a name="line.309"></a>
+<span class="sourceLineNo">310</span><a name="line.310"></a>
+<span class="sourceLineNo">311</span>    // Iterator&lt;Class&lt;?&gt;&gt; value = previously_processed_classes.iterator();<a name="line.311"></a>
+<span class="sourceLineNo">312</span>    // while (value.hasNext()) {<a name="line.312"></a>
+<span class="sourceLineNo">313</span>    //   System.out.println(value.next());<a name="line.313"></a>
+<span class="sourceLineNo">314</span>    // }<a name="line.314"></a>
+<span class="sourceLineNo">315</span><a name="line.315"></a>
+<span class="sourceLineNo">316</span>    // Initialize the static tag array<a name="line.316"></a>
+<span class="sourceLineNo">317</span>    if (DynComp.verbose) {<a name="line.317"></a>
+<span class="sourceLineNo">318</span>      System.out.println("call DCRuntime.init");<a name="line.318"></a>
+<span class="sourceLineNo">319</span>    }<a name="line.319"></a>
+<span class="sourceLineNo">320</span>    DCRuntime.init();<a name="line.320"></a>
+<span class="sourceLineNo">321</span><a name="line.321"></a>
+<span class="sourceLineNo">322</span>    if (DynComp.verbose) {<a name="line.322"></a>
+<span class="sourceLineNo">323</span>      System.out.println("exit premain");<a name="line.323"></a>
+<span class="sourceLineNo">324</span>    }<a name="line.324"></a>
+<span class="sourceLineNo">325</span>  }<a name="line.325"></a>
+<span class="sourceLineNo">326</span><a name="line.326"></a>
+<span class="sourceLineNo">327</span>  /**<a name="line.327"></a>
+<span class="sourceLineNo">328</span>   * Get an array of already loaded classes that need to be retransformed.<a name="line.328"></a>
+<span class="sourceLineNo">329</span>   *<a name="line.329"></a>
+<span class="sourceLineNo">330</span>   * @param inst instrumentation instance to be used to transform classes<a name="line.330"></a>
+<span class="sourceLineNo">331</span>   * @return an array containing the classes to be retransformed<a name="line.331"></a>
+<span class="sourceLineNo">332</span>   */<a name="line.332"></a>
+<span class="sourceLineNo">333</span>  private static Class&lt;?&gt;[] get_retransform_list(Instrumentation inst) {<a name="line.333"></a>
+<span class="sourceLineNo">334</span>    if (DynComp.verbose) {<a name="line.334"></a>
+<span class="sourceLineNo">335</span>      System.out.println("get retransformation list");<a name="line.335"></a>
+<span class="sourceLineNo">336</span>    }<a name="line.336"></a>
+<span class="sourceLineNo">337</span><a name="line.337"></a>
+<span class="sourceLineNo">338</span>    ArrayList&lt;Class&lt;?&gt;&gt; class_list = new ArrayList&lt;&gt;();<a name="line.338"></a>
+<span class="sourceLineNo">339</span><a name="line.339"></a>
+<span class="sourceLineNo">340</span>    // Get the set of already loaded classes.<a name="line.340"></a>
+<span class="sourceLineNo">341</span>    Class&lt;?&gt;[] loaded_classes = inst.getAllLoadedClasses();<a name="line.341"></a>
+<span class="sourceLineNo">342</span><a name="line.342"></a>
+<span class="sourceLineNo">343</span>    for (Class&lt;?&gt; loaded_class : loaded_classes) {<a name="line.343"></a>
+<span class="sourceLineNo">344</span>      // System.out.println(loaded_class + ": " + loaded_class.getClassLoader());<a name="line.344"></a>
+<span class="sourceLineNo">345</span>      // Skip previously processed classes.<a name="line.345"></a>
+<span class="sourceLineNo">346</span>      if (previously_processed_classes.contains(loaded_class)) continue;<a name="line.346"></a>
+<span class="sourceLineNo">347</span>      // Skip Daikon classes.<a name="line.347"></a>
+<span class="sourceLineNo">348</span>      if (loaded_class.getName().startsWith("daikon.")) continue;<a name="line.348"></a>
+<span class="sourceLineNo">349</span>      // Skip BCEL classes.<a name="line.349"></a>
+<span class="sourceLineNo">350</span>      if (loaded_class.getName().startsWith("org.apache.bcel.")) continue;<a name="line.350"></a>
+<span class="sourceLineNo">351</span>      // Object cannot be instrumented due to its fundimental nature.<a name="line.351"></a>
+<span class="sourceLineNo">352</span>      if (loaded_class.getName().equals("java.lang.Object")) continue;<a name="line.352"></a>
+<span class="sourceLineNo">353</span>      if (inst.isModifiableClass(loaded_class)) {<a name="line.353"></a>
+<span class="sourceLineNo">354</span>        // System.out.println(loaded_class);<a name="line.354"></a>
+<span class="sourceLineNo">355</span>        class_list.add(loaded_class);<a name="line.355"></a>
+<span class="sourceLineNo">356</span>      }<a name="line.356"></a>
+<span class="sourceLineNo">357</span>    }<a name="line.357"></a>
+<span class="sourceLineNo">358</span>    previously_processed_classes = new HashSet&lt;&gt;(Arrays.asList(loaded_classes));<a name="line.358"></a>
+<span class="sourceLineNo">359</span>    return class_list.toArray(new Class&lt;?&gt;[class_list.size()]);<a name="line.359"></a>
+<span class="sourceLineNo">360</span>  }<a name="line.360"></a>
+<span class="sourceLineNo">361</span><a name="line.361"></a>
+<span class="sourceLineNo">362</span>  /** Shutdown thread that writes out the comparability results. */<a name="line.362"></a>
+<span class="sourceLineNo">363</span>  public static class ShutdownThread extends Thread {<a name="line.363"></a>
+<span class="sourceLineNo">364</span><a name="line.364"></a>
+<span class="sourceLineNo">365</span>    @Override<a name="line.365"></a>
+<span class="sourceLineNo">366</span>    public void run() {<a name="line.366"></a>
+<span class="sourceLineNo">367</span><a name="line.367"></a>
+<span class="sourceLineNo">368</span>      if (DynComp.verbose) {<a name="line.368"></a>
+<span class="sourceLineNo">369</span>        System.out.println("in shutdown");<a name="line.369"></a>
+<span class="sourceLineNo">370</span>      }<a name="line.370"></a>
+<span class="sourceLineNo">371</span>      in_shutdown = true;<a name="line.371"></a>
+<span class="sourceLineNo">372</span><a name="line.372"></a>
+<span class="sourceLineNo">373</span>      // for debugging<a name="line.373"></a>
+<span class="sourceLineNo">374</span>      // Class&lt;?&gt;[] loaded_classes = instr.getAllLoadedClasses();<a name="line.374"></a>
+<span class="sourceLineNo">375</span>      // for (Class&lt;?&gt; loaded_class : loaded_classes) {<a name="line.375"></a>
+<span class="sourceLineNo">376</span>      //   System.out.println(loaded_class + ": " + loaded_class.getClassLoader());<a name="line.376"></a>
+<span class="sourceLineNo">377</span>      // }<a name="line.377"></a>
+<span class="sourceLineNo">378</span><a name="line.378"></a>
+<span class="sourceLineNo">379</span>      // If requested, write the comparability data to a file<a name="line.379"></a>
+<span class="sourceLineNo">380</span>      if (DynComp.comparability_file != null) {<a name="line.380"></a>
+<span class="sourceLineNo">381</span>        if (DynComp.verbose) {<a name="line.381"></a>
+<span class="sourceLineNo">382</span>          System.out.println("Writing comparability sets to " + DynComp.comparability_file);<a name="line.382"></a>
+<span class="sourceLineNo">383</span>        }<a name="line.383"></a>
+<span class="sourceLineNo">384</span>        PrintWriter compare_out = open(DynComp.comparability_file);<a name="line.384"></a>
+<span class="sourceLineNo">385</span>        long startTime = System.nanoTime();<a name="line.385"></a>
+<span class="sourceLineNo">386</span>        if (DynComp.no_primitives) {<a name="line.386"></a>
+<span class="sourceLineNo">387</span>          DCRuntime.print_all_comparable_refs_only(compare_out);<a name="line.387"></a>
+<span class="sourceLineNo">388</span>        } else {<a name="line.388"></a>
+<span class="sourceLineNo">389</span>          DCRuntime.print_all_comparable(compare_out);<a name="line.389"></a>
+<span class="sourceLineNo">390</span>        }<a name="line.390"></a>
+<span class="sourceLineNo">391</span>        compare_out.close();<a name="line.391"></a>
+<span class="sourceLineNo">392</span>        if (DynComp.verbose) {<a name="line.392"></a>
+<span class="sourceLineNo">393</span>          long duration = System.nanoTime() - startTime;<a name="line.393"></a>
+<span class="sourceLineNo">394</span>          System.out.printf(<a name="line.394"></a>
+<span class="sourceLineNo">395</span>              "Comparability sets written in %ds%n", TimeUnit.NANOSECONDS.toSeconds(duration));<a name="line.395"></a>
+<span class="sourceLineNo">396</span>        }<a name="line.396"></a>
+<span class="sourceLineNo">397</span>      }<a name="line.397"></a>
+<span class="sourceLineNo">398</span><a name="line.398"></a>
+<span class="sourceLineNo">399</span>      if (DynComp.trace_file != null) {<a name="line.399"></a>
+<span class="sourceLineNo">400</span>        if (DynComp.verbose) {<a name="line.400"></a>
+<span class="sourceLineNo">401</span>          System.out.println("Writing traced comparability sets to " + DynComp.trace_file);<a name="line.401"></a>
+<span class="sourceLineNo">402</span>        }<a name="line.402"></a>
+<span class="sourceLineNo">403</span>        PrintWriter trace_out = open(DynComp.trace_file);<a name="line.403"></a>
+<span class="sourceLineNo">404</span>        long startTime = System.nanoTime();<a name="line.404"></a>
+<span class="sourceLineNo">405</span>        DCRuntime.trace_all_comparable(trace_out);<a name="line.405"></a>
+<span class="sourceLineNo">406</span>        trace_out.close();<a name="line.406"></a>
+<span class="sourceLineNo">407</span>        if (DynComp.verbose) {<a name="line.407"></a>
+<span class="sourceLineNo">408</span>          long duration = System.nanoTime() - startTime;<a name="line.408"></a>
+<span class="sourceLineNo">409</span>          System.out.printf(<a name="line.409"></a>
+<span class="sourceLineNo">410</span>              "Traced comparability sets written in %ds%n",<a name="line.410"></a>
+<span class="sourceLineNo">411</span>              TimeUnit.NANOSECONDS.toSeconds(duration));<a name="line.411"></a>
+<span class="sourceLineNo">412</span>        }<a name="line.412"></a>
+<span class="sourceLineNo">413</span>      } else {<a name="line.413"></a>
+<span class="sourceLineNo">414</span>        // Writing comparability sets to standard output?<a name="line.414"></a>
+<span class="sourceLineNo">415</span>      }<a name="line.415"></a>
+<span class="sourceLineNo">416</span><a name="line.416"></a>
+<span class="sourceLineNo">417</span>      if (DynComp.verbose) {<a name="line.417"></a>
+<span class="sourceLineNo">418</span>        DCRuntime.decl_stats();<a name="line.418"></a>
+<span class="sourceLineNo">419</span>      }<a name="line.419"></a>
+<span class="sourceLineNo">420</span><a name="line.420"></a>
+<span class="sourceLineNo">421</span>      // Write the decl file out<a name="line.421"></a>
+<span class="sourceLineNo">422</span>      @SuppressWarnings(<a name="line.422"></a>
+<span class="sourceLineNo">423</span>          "nullness:argument.type.incompatible") // DynComp guarantees decl_file is non null<a name="line.423"></a>
+<span class="sourceLineNo">424</span>      File decl_file = new File(DynComp.output_dir, DynComp.decl_file);<a name="line.424"></a>
+<span class="sourceLineNo">425</span>      if (DynComp.verbose) System.out.println("Writing decl file to " + decl_file);<a name="line.425"></a>
+<span class="sourceLineNo">426</span>      PrintWriter decl_fp = open(decl_file);<a name="line.426"></a>
+<span class="sourceLineNo">427</span>      long startTime = System.nanoTime();<a name="line.427"></a>
+<span class="sourceLineNo">428</span>      DCRuntime.print_decl_file(decl_fp);<a name="line.428"></a>
+<span class="sourceLineNo">429</span>      decl_fp.close();<a name="line.429"></a>
+<span class="sourceLineNo">430</span>      if (DynComp.verbose) {<a name="line.430"></a>
+<span class="sourceLineNo">431</span>        long duration = System.nanoTime() - startTime;<a name="line.431"></a>
+<span class="sourceLineNo">432</span>        System.out.printf("Decl file written in %ds%n", TimeUnit.NANOSECONDS.toSeconds(duration));<a name="line.432"></a>
+<span class="sourceLineNo">433</span>        System.out.printf("comp_list = %,d%n", DCRuntime.comp_list_ms);<a name="line.433"></a>
+<span class="sourceLineNo">434</span>        System.out.printf("ppt name  = %,d%n", DCRuntime.ppt_name_ms);<a name="line.434"></a>
+<span class="sourceLineNo">435</span>        System.out.printf("decl vars = %,d%n", DCRuntime.decl_vars_ms);<a name="line.435"></a>
+<span class="sourceLineNo">436</span>        System.out.printf("total     = %,d%n", DCRuntime.total_ms);<a name="line.436"></a>
+<span class="sourceLineNo">437</span>      }<a name="line.437"></a>
+<span class="sourceLineNo">438</span>      if (DynComp.verbose) System.out.println("DynComp complete");<a name="line.438"></a>
+<span class="sourceLineNo">439</span>    }<a name="line.439"></a>
+<span class="sourceLineNo">440</span>  }<a name="line.440"></a>
+<span class="sourceLineNo">441</span><a name="line.441"></a>
+<span class="sourceLineNo">442</span>  /**<a name="line.442"></a>
+<span class="sourceLineNo">443</span>   * Helper method to create a PrintWriter from a File.<a name="line.443"></a>
+<span class="sourceLineNo">444</span>   *<a name="line.444"></a>
+<span class="sourceLineNo">445</span>   * @param filename the File to be opened<a name="line.445"></a>
+<span class="sourceLineNo">446</span>   * @return a new PrintWriter from filename<a name="line.446"></a>
+<span class="sourceLineNo">447</span>   */<a name="line.447"></a>
+<span class="sourceLineNo">448</span>  public static PrintWriter open(File filename) {<a name="line.448"></a>
+<span class="sourceLineNo">449</span>    try {<a name="line.449"></a>
+<span class="sourceLineNo">450</span>      return new PrintWriter(Files.newBufferedWriter(filename.toPath(), UTF_8));<a name="line.450"></a>
+<span class="sourceLineNo">451</span>      // return new PrintWriter (filename);<a name="line.451"></a>
+<span class="sourceLineNo">452</span>      // return new PrintStream (new BufferedWriter<a name="line.452"></a>
+<span class="sourceLineNo">453</span>      //            (new Outpu32tStreamWriter (new FileOutputStream(filename))));<a name="line.453"></a>
+<span class="sourceLineNo">454</span>    } catch (Exception e) {<a name="line.454"></a>
+<span class="sourceLineNo">455</span>      throw new Error("Can't open " + filename, e);<a name="line.455"></a>
+<span class="sourceLineNo">456</span>    }<a name="line.456"></a>
+<span class="sourceLineNo">457</span>  }<a name="line.457"></a>
+<span class="sourceLineNo">458</span>}<a name="line.458"></a>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</pre>
+</div>
+</body>
+</html>

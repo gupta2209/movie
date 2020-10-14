@@ -1,0 +1,535 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<html lang="en">
+<head><link rel="icon" href="../../daikon-favicon.png" type="image/png"/>
+<title>Source code</title>
+<link rel="stylesheet" type="text/css" href="../../stylesheet.css" title="Style">
+</head>
+<body>
+<div class="sourceContainer">
+<pre><span class="sourceLineNo">001</span>package daikon;<a name="line.1"></a>
+<span class="sourceLineNo">002</span><a name="line.2"></a>
+<span class="sourceLineNo">003</span>import daikon.split.PptSplitter;<a name="line.3"></a>
+<span class="sourceLineNo">004</span>import daikon.suppress.NIS;<a name="line.4"></a>
+<span class="sourceLineNo">005</span>import gnu.getopt.*;<a name="line.5"></a>
+<span class="sourceLineNo">006</span>import java.io.File;<a name="line.6"></a>
+<span class="sourceLineNo">007</span>import java.io.FileNotFoundException;<a name="line.7"></a>
+<span class="sourceLineNo">008</span>import java.io.IOException;<a name="line.8"></a>
+<span class="sourceLineNo">009</span>import java.io.OptionalDataException;<a name="line.9"></a>
+<span class="sourceLineNo">010</span>import java.io.StreamCorruptedException;<a name="line.10"></a>
+<span class="sourceLineNo">011</span>import java.util.ArrayList;<a name="line.11"></a>
+<span class="sourceLineNo">012</span>import java.util.List;<a name="line.12"></a>
+<span class="sourceLineNo">013</span>import java.util.Set;<a name="line.13"></a>
+<span class="sourceLineNo">014</span>import java.util.TreeSet;<a name="line.14"></a>
+<span class="sourceLineNo">015</span>import java.util.concurrent.TimeUnit;<a name="line.15"></a>
+<span class="sourceLineNo">016</span>import java.util.logging.Level;<a name="line.16"></a>
+<span class="sourceLineNo">017</span>import java.util.logging.Logger;<a name="line.17"></a>
+<span class="sourceLineNo">018</span>import org.checkerframework.checker.nullness.qual.Nullable;<a name="line.18"></a>
+<span class="sourceLineNo">019</span>import org.plumelib.util.UtilPlume;<a name="line.19"></a>
+<span class="sourceLineNo">020</span><a name="line.20"></a>
+<span class="sourceLineNo">021</span>/**<a name="line.21"></a>
+<span class="sourceLineNo">022</span> * Merges invariants from multiple invariant files into a single invariant file. It does this by<a name="line.22"></a>
+<span class="sourceLineNo">023</span> * forming a hierarchy over the ppts from each invariant file and using the normal hierarchy merging<a name="line.23"></a>
+<span class="sourceLineNo">024</span> * code to merge the invariants.<a name="line.24"></a>
+<span class="sourceLineNo">025</span> *<a name="line.25"></a>
+<span class="sourceLineNo">026</span> * &lt;p&gt;The ppts from each invariant file are merged to create a single ppt map that contains the ppts<a name="line.26"></a>
+<span class="sourceLineNo">027</span> * from all of the files. At each leaf of the merged map, a hierarchy is formed to the ppts from<a name="line.27"></a>
+<span class="sourceLineNo">028</span> * each of the input files.<a name="line.28"></a>
+<span class="sourceLineNo">029</span> */<a name="line.29"></a>
+<span class="sourceLineNo">030</span>public final class MergeInvariants {<a name="line.30"></a>
+<span class="sourceLineNo">031</span>  private MergeInvariants() {<a name="line.31"></a>
+<span class="sourceLineNo">032</span>    throw new Error("do not instantiate");<a name="line.32"></a>
+<span class="sourceLineNo">033</span>  }<a name="line.33"></a>
+<span class="sourceLineNo">034</span><a name="line.34"></a>
+<span class="sourceLineNo">035</span>  public static final Logger debug = Logger.getLogger("daikon.MergeInvariants");<a name="line.35"></a>
+<span class="sourceLineNo">036</span><a name="line.36"></a>
+<span class="sourceLineNo">037</span>  public static final Logger debugProgress = Logger.getLogger("daikon.MergeInvariants.progress");<a name="line.37"></a>
+<span class="sourceLineNo">038</span><a name="line.38"></a>
+<span class="sourceLineNo">039</span>  public static @Nullable File output_inv_file;<a name="line.39"></a>
+<span class="sourceLineNo">040</span><a name="line.40"></a>
+<span class="sourceLineNo">041</span>  private static String usage =<a name="line.41"></a>
+<span class="sourceLineNo">042</span>      UtilPlume.joinLines(<a name="line.42"></a>
+<span class="sourceLineNo">043</span>          "Usage: java daikon.MergeInvariants [OPTION]... FILE",<a name="line.43"></a>
+<span class="sourceLineNo">044</span>          "  -h, --" + Daikon.help_SWITCH,<a name="line.44"></a>
+<span class="sourceLineNo">045</span>          "      Display this usage message",<a name="line.45"></a>
+<span class="sourceLineNo">046</span>          "  --" + Daikon.config_option_SWITCH,<a name="line.46"></a>
+<span class="sourceLineNo">047</span>          "      Specify a configuration option ",<a name="line.47"></a>
+<span class="sourceLineNo">048</span>          "  --" + Daikon.debug_SWITCH,<a name="line.48"></a>
+<span class="sourceLineNo">049</span>          "      Specify a logger to enable",<a name="line.49"></a>
+<span class="sourceLineNo">050</span>          "  --" + Daikon.track_SWITCH,<a name="line.50"></a>
+<span class="sourceLineNo">051</span>          "      Specify a class, varinfos, and ppt to debug track.  Format"<a name="line.51"></a>
+<span class="sourceLineNo">052</span>              + "is class&lt;var1,var2,var3&gt;@ppt",<a name="line.52"></a>
+<span class="sourceLineNo">053</span>          "   -o ",<a name="line.53"></a>
+<span class="sourceLineNo">054</span>          "      Specify an output inv file.  If not specified, the results are printed");<a name="line.54"></a>
+<span class="sourceLineNo">055</span><a name="line.55"></a>
+<span class="sourceLineNo">056</span>  public static void main(final String[] args)<a name="line.56"></a>
+<span class="sourceLineNo">057</span>      throws FileNotFoundException, StreamCorruptedException, OptionalDataException, IOException,<a name="line.57"></a>
+<span class="sourceLineNo">058</span>          ClassNotFoundException {<a name="line.58"></a>
+<span class="sourceLineNo">059</span>    try {<a name="line.59"></a>
+<span class="sourceLineNo">060</span>      mainHelper(args);<a name="line.60"></a>
+<span class="sourceLineNo">061</span>    } catch (Daikon.DaikonTerminationException e) {<a name="line.61"></a>
+<span class="sourceLineNo">062</span>      Daikon.handleDaikonTerminationException(e);<a name="line.62"></a>
+<span class="sourceLineNo">063</span>    }<a name="line.63"></a>
+<span class="sourceLineNo">064</span>  }<a name="line.64"></a>
+<span class="sourceLineNo">065</span><a name="line.65"></a>
+<span class="sourceLineNo">066</span>  /**<a name="line.66"></a>
+<span class="sourceLineNo">067</span>   * This does the work of {@link #main(String[])}, but it never calls System.exit, so it is<a name="line.67"></a>
+<span class="sourceLineNo">068</span>   * appropriate to be called progrmmatically.<a name="line.68"></a>
+<span class="sourceLineNo">069</span>   */<a name="line.69"></a>
+<span class="sourceLineNo">070</span>  @SuppressWarnings("nullness:contracts.precondition.not.satisfied") // private field<a name="line.70"></a>
+<span class="sourceLineNo">071</span>  public static void mainHelper(String[] args)<a name="line.71"></a>
+<span class="sourceLineNo">072</span>      throws FileNotFoundException, StreamCorruptedException, OptionalDataException, IOException,<a name="line.72"></a>
+<span class="sourceLineNo">073</span>          ClassNotFoundException {<a name="line.73"></a>
+<span class="sourceLineNo">074</span><a name="line.74"></a>
+<span class="sourceLineNo">075</span>    daikon.LogHelper.setupLogs(daikon.LogHelper.INFO);<a name="line.75"></a>
+<span class="sourceLineNo">076</span><a name="line.76"></a>
+<span class="sourceLineNo">077</span>    LongOpt[] longopts =<a name="line.77"></a>
+<span class="sourceLineNo">078</span>        new LongOpt[] {<a name="line.78"></a>
+<span class="sourceLineNo">079</span>          new LongOpt(Daikon.help_SWITCH, LongOpt.NO_ARGUMENT, null, 0),<a name="line.79"></a>
+<span class="sourceLineNo">080</span>          new LongOpt(Daikon.config_option_SWITCH, LongOpt.REQUIRED_ARGUMENT, null, 0),<a name="line.80"></a>
+<span class="sourceLineNo">081</span>          new LongOpt(Daikon.debugAll_SWITCH, LongOpt.NO_ARGUMENT, null, 0),<a name="line.81"></a>
+<span class="sourceLineNo">082</span>          new LongOpt(Daikon.debug_SWITCH, LongOpt.REQUIRED_ARGUMENT, null, 0),<a name="line.82"></a>
+<span class="sourceLineNo">083</span>          new LongOpt(Daikon.track_SWITCH, LongOpt.REQUIRED_ARGUMENT, null, 0),<a name="line.83"></a>
+<span class="sourceLineNo">084</span>        };<a name="line.84"></a>
+<span class="sourceLineNo">085</span><a name="line.85"></a>
+<span class="sourceLineNo">086</span>    Getopt g = new Getopt("daikon.MergeInvariants", args, "ho:", longopts);<a name="line.86"></a>
+<span class="sourceLineNo">087</span>    int c;<a name="line.87"></a>
+<span class="sourceLineNo">088</span>    while ((c = g.getopt()) != -1) {<a name="line.88"></a>
+<span class="sourceLineNo">089</span>      switch (c) {<a name="line.89"></a>
+<span class="sourceLineNo">090</span><a name="line.90"></a>
+<span class="sourceLineNo">091</span>          // long option<a name="line.91"></a>
+<span class="sourceLineNo">092</span>        case 0:<a name="line.92"></a>
+<span class="sourceLineNo">093</span>          String option_name = longopts[g.getLongind()].getName();<a name="line.93"></a>
+<span class="sourceLineNo">094</span>          if (Daikon.help_SWITCH.equals(option_name)) {<a name="line.94"></a>
+<span class="sourceLineNo">095</span>            System.out.println(usage);<a name="line.95"></a>
+<span class="sourceLineNo">096</span>            throw new Daikon.NormalTermination();<a name="line.96"></a>
+<span class="sourceLineNo">097</span>          } else if (Daikon.config_option_SWITCH.equals(option_name)) {<a name="line.97"></a>
+<span class="sourceLineNo">098</span>            String item = Daikon.getOptarg(g);<a name="line.98"></a>
+<span class="sourceLineNo">099</span>            daikon.config.Configuration.getInstance().apply(item);<a name="line.99"></a>
+<span class="sourceLineNo">100</span>            break;<a name="line.100"></a>
+<span class="sourceLineNo">101</span><a name="line.101"></a>
+<span class="sourceLineNo">102</span>          } else if (Daikon.debugAll_SWITCH.equals(option_name)) {<a name="line.102"></a>
+<span class="sourceLineNo">103</span>            Global.debugAll = true;<a name="line.103"></a>
+<span class="sourceLineNo">104</span><a name="line.104"></a>
+<span class="sourceLineNo">105</span>          } else if (Daikon.debug_SWITCH.equals(option_name)) {<a name="line.105"></a>
+<span class="sourceLineNo">106</span>            LogHelper.setLevel(Daikon.getOptarg(g), LogHelper.FINE);<a name="line.106"></a>
+<span class="sourceLineNo">107</span>          } else if (Daikon.track_SWITCH.equals(option_name)) {<a name="line.107"></a>
+<span class="sourceLineNo">108</span>            LogHelper.setLevel("daikon.Debug", LogHelper.FINE);<a name="line.108"></a>
+<span class="sourceLineNo">109</span>            String error = Debug.add_track(Daikon.getOptarg(g));<a name="line.109"></a>
+<span class="sourceLineNo">110</span>            if (error != null) {<a name="line.110"></a>
+<span class="sourceLineNo">111</span>              throw new Daikon.UserError(<a name="line.111"></a>
+<span class="sourceLineNo">112</span>                  "Error parsing track argument '" + Daikon.getOptarg(g) + "' - " + error);<a name="line.112"></a>
+<span class="sourceLineNo">113</span>            }<a name="line.113"></a>
+<span class="sourceLineNo">114</span>          } else {<a name="line.114"></a>
+<span class="sourceLineNo">115</span>            throw new Daikon.UserError("Unknown long option received: " + option_name);<a name="line.115"></a>
+<span class="sourceLineNo">116</span>          }<a name="line.116"></a>
+<span class="sourceLineNo">117</span>          break;<a name="line.117"></a>
+<span class="sourceLineNo">118</span><a name="line.118"></a>
+<span class="sourceLineNo">119</span>        case 'h':<a name="line.119"></a>
+<span class="sourceLineNo">120</span>          System.out.println(usage);<a name="line.120"></a>
+<span class="sourceLineNo">121</span>          throw new Daikon.NormalTermination();<a name="line.121"></a>
+<span class="sourceLineNo">122</span><a name="line.122"></a>
+<span class="sourceLineNo">123</span>        case 'o':<a name="line.123"></a>
+<span class="sourceLineNo">124</span>          String output_inv_filename = Daikon.getOptarg(g);<a name="line.124"></a>
+<span class="sourceLineNo">125</span><a name="line.125"></a>
+<span class="sourceLineNo">126</span>          if (output_inv_file != null) {<a name="line.126"></a>
+<span class="sourceLineNo">127</span>            throw new Daikon.UserError(<a name="line.127"></a>
+<span class="sourceLineNo">128</span>                "multiple serialization output files supplied on command line: "<a name="line.128"></a>
+<span class="sourceLineNo">129</span>                    + output_inv_file<a name="line.129"></a>
+<span class="sourceLineNo">130</span>                    + " "<a name="line.130"></a>
+<span class="sourceLineNo">131</span>                    + output_inv_filename);<a name="line.131"></a>
+<span class="sourceLineNo">132</span>          }<a name="line.132"></a>
+<span class="sourceLineNo">133</span><a name="line.133"></a>
+<span class="sourceLineNo">134</span>          output_inv_file = new File(output_inv_filename);<a name="line.134"></a>
+<span class="sourceLineNo">135</span><a name="line.135"></a>
+<span class="sourceLineNo">136</span>          if (!UtilPlume.canCreateAndWrite(output_inv_file)) {<a name="line.136"></a>
+<span class="sourceLineNo">137</span>            throw new Daikon.UserError(<a name="line.137"></a>
+<span class="sourceLineNo">138</span>                "Cannot write to serialization output file " + output_inv_file);<a name="line.138"></a>
+<span class="sourceLineNo">139</span>          }<a name="line.139"></a>
+<span class="sourceLineNo">140</span>          break;<a name="line.140"></a>
+<span class="sourceLineNo">141</span><a name="line.141"></a>
+<span class="sourceLineNo">142</span>        case '?':<a name="line.142"></a>
+<span class="sourceLineNo">143</span>          break; // getopt() already printed an error<a name="line.143"></a>
+<span class="sourceLineNo">144</span><a name="line.144"></a>
+<span class="sourceLineNo">145</span>        default:<a name="line.145"></a>
+<span class="sourceLineNo">146</span>          System.out.println("getopt() returned " + c);<a name="line.146"></a>
+<span class="sourceLineNo">147</span>          break;<a name="line.147"></a>
+<span class="sourceLineNo">148</span>      }<a name="line.148"></a>
+<span class="sourceLineNo">149</span>    }<a name="line.149"></a>
+<span class="sourceLineNo">150</span><a name="line.150"></a>
+<span class="sourceLineNo">151</span>    daikon.LogHelper.setupLogs(Global.debugAll ? LogHelper.FINE : LogHelper.INFO);<a name="line.151"></a>
+<span class="sourceLineNo">152</span><a name="line.152"></a>
+<span class="sourceLineNo">153</span>    List&lt;File&gt; inv_files = new ArrayList&lt;&gt;();<a name="line.153"></a>
+<span class="sourceLineNo">154</span>    File decl_file = null;<a name="line.154"></a>
+<span class="sourceLineNo">155</span>    Set&lt;File&gt; splitter_files = new TreeSet&lt;&gt;();<a name="line.155"></a>
+<span class="sourceLineNo">156</span><a name="line.156"></a>
+<span class="sourceLineNo">157</span>    // Get each file specified<a name="line.157"></a>
+<span class="sourceLineNo">158</span>    for (int i = g.getOptind(); i &lt; args.length; i++) {<a name="line.158"></a>
+<span class="sourceLineNo">159</span>      File file = new File(args[i]);<a name="line.159"></a>
+<span class="sourceLineNo">160</span>      if (!file.exists()) {<a name="line.160"></a>
+<span class="sourceLineNo">161</span>        throw new Daikon.UserError("File " + file + " not found.");<a name="line.161"></a>
+<span class="sourceLineNo">162</span>      }<a name="line.162"></a>
+<span class="sourceLineNo">163</span>      if (file.toString().indexOf(".inv") != -1) {<a name="line.163"></a>
+<span class="sourceLineNo">164</span>        inv_files.add(file);<a name="line.164"></a>
+<span class="sourceLineNo">165</span>      } else if (file.toString().indexOf(".decls") != -1) {<a name="line.165"></a>
+<span class="sourceLineNo">166</span>        if (decl_file != null) {<a name="line.166"></a>
+<span class="sourceLineNo">167</span>          throw new Daikon.UserError("Only one decl file may be specified");<a name="line.167"></a>
+<span class="sourceLineNo">168</span>        }<a name="line.168"></a>
+<span class="sourceLineNo">169</span>        decl_file = file;<a name="line.169"></a>
+<span class="sourceLineNo">170</span>      } else if (file.toString().indexOf(".spinfo") != -1) {<a name="line.170"></a>
+<span class="sourceLineNo">171</span>        splitter_files.add(file);<a name="line.171"></a>
+<span class="sourceLineNo">172</span>      } else {<a name="line.172"></a>
+<span class="sourceLineNo">173</span>        throw new Daikon.UserError("Unrecognized file type: " + file);<a name="line.173"></a>
+<span class="sourceLineNo">174</span>      }<a name="line.174"></a>
+<span class="sourceLineNo">175</span>    }<a name="line.175"></a>
+<span class="sourceLineNo">176</span><a name="line.176"></a>
+<span class="sourceLineNo">177</span>    // Make sure at least two files were specified<a name="line.177"></a>
+<span class="sourceLineNo">178</span>    if (inv_files.size() &lt; 2) {<a name="line.178"></a>
+<span class="sourceLineNo">179</span>      throw new Daikon.UserError(<a name="line.179"></a>
+<span class="sourceLineNo">180</span>          "Must specify at least two inv files; only specified "<a name="line.180"></a>
+<span class="sourceLineNo">181</span>              + UtilPlume.nplural(inv_files.size(), "file"));<a name="line.181"></a>
+<span class="sourceLineNo">182</span>    }<a name="line.182"></a>
+<span class="sourceLineNo">183</span><a name="line.183"></a>
+<span class="sourceLineNo">184</span>    // Setup the default for guarding<a name="line.184"></a>
+<span class="sourceLineNo">185</span>    PrintInvariants.validateGuardNulls();<a name="line.185"></a>
+<span class="sourceLineNo">186</span><a name="line.186"></a>
+<span class="sourceLineNo">187</span>    // Initialize the prototype invariants and NI suppressions<a name="line.187"></a>
+<span class="sourceLineNo">188</span>    Daikon.setup_proto_invs();<a name="line.188"></a>
+<span class="sourceLineNo">189</span>    NIS.init_ni_suppression();<a name="line.189"></a>
+<span class="sourceLineNo">190</span><a name="line.190"></a>
+<span class="sourceLineNo">191</span>    // Read in each of the specified maps<a name="line.191"></a>
+<span class="sourceLineNo">192</span>    List&lt;PptMap&gt; pptmaps = new ArrayList&lt;&gt;();<a name="line.192"></a>
+<span class="sourceLineNo">193</span>    for (File file : inv_files) {<a name="line.193"></a>
+<span class="sourceLineNo">194</span>      debugProgress.fine("Processing " + file);<a name="line.194"></a>
+<span class="sourceLineNo">195</span>      PptMap ppts = FileIO.read_serialized_pptmap(file, true);<a name="line.195"></a>
+<span class="sourceLineNo">196</span>      ppts.repCheck();<a name="line.196"></a>
+<span class="sourceLineNo">197</span>      pptmaps.add(ppts);<a name="line.197"></a>
+<span class="sourceLineNo">198</span>      Debug.check(ppts, "After initial reading of " + file);<a name="line.198"></a>
+<span class="sourceLineNo">199</span>    }<a name="line.199"></a>
+<span class="sourceLineNo">200</span><a name="line.200"></a>
+<span class="sourceLineNo">201</span>    // Merged ppt map (result of merging each specified inv file)<a name="line.201"></a>
+<span class="sourceLineNo">202</span>    PptMap merge_ppts = null;<a name="line.202"></a>
+<span class="sourceLineNo">203</span><a name="line.203"></a>
+<span class="sourceLineNo">204</span>    // if no decls file was specified<a name="line.204"></a>
+<span class="sourceLineNo">205</span>    if (decl_file == null) {<a name="line.205"></a>
+<span class="sourceLineNo">206</span>      if (splitter_files.size() &gt; 0) {<a name="line.206"></a>
+<span class="sourceLineNo">207</span>        throw new Daikon.UserError(".spinfo files may only be specified along with a .decls file");<a name="line.207"></a>
+<span class="sourceLineNo">208</span>      }<a name="line.208"></a>
+<span class="sourceLineNo">209</span><a name="line.209"></a>
+<span class="sourceLineNo">210</span>      // Read in each of the maps again to build a template that contains all<a name="line.210"></a>
+<span class="sourceLineNo">211</span>      // of the program points from each map.<a name="line.211"></a>
+<span class="sourceLineNo">212</span>      for (File file : inv_files) {<a name="line.212"></a>
+<span class="sourceLineNo">213</span>        debugProgress.fine("Reading " + file + " as merge template");<a name="line.213"></a>
+<span class="sourceLineNo">214</span>        if (merge_ppts == null) {<a name="line.214"></a>
+<span class="sourceLineNo">215</span>          merge_ppts = FileIO.read_serialized_pptmap(file, true);<a name="line.215"></a>
+<span class="sourceLineNo">216</span>        } else {<a name="line.216"></a>
+<span class="sourceLineNo">217</span>          PptMap pmap = FileIO.read_serialized_pptmap(file, true);<a name="line.217"></a>
+<span class="sourceLineNo">218</span>          for (PptTopLevel ppt : pmap.pptIterable()) {<a name="line.218"></a>
+<span class="sourceLineNo">219</span>            if (merge_ppts.containsName(ppt.name())) {<a name="line.219"></a>
+<span class="sourceLineNo">220</span>              // System.out.printf("Not adding ppt %s from %s%n", ppt, file);<a name="line.220"></a>
+<span class="sourceLineNo">221</span>              continue;<a name="line.221"></a>
+<span class="sourceLineNo">222</span>            }<a name="line.222"></a>
+<span class="sourceLineNo">223</span>            merge_ppts.add(ppt);<a name="line.223"></a>
+<span class="sourceLineNo">224</span>            // System.out.printf("Adding ppt %s from %s%n", ppt, file);<a name="line.224"></a>
+<span class="sourceLineNo">225</span><a name="line.225"></a>
+<span class="sourceLineNo">226</span>            // Make sure that the parents of this ppt are already in<a name="line.226"></a>
+<span class="sourceLineNo">227</span>            // the map.  This will be true if all possible children of<a name="line.227"></a>
+<span class="sourceLineNo">228</span>            // any ppt are always included in the same invariant file.<a name="line.228"></a>
+<span class="sourceLineNo">229</span>            // For example, all possible enter/exit points should be<a name="line.229"></a>
+<span class="sourceLineNo">230</span>            // included with each object point.  This is true for Chicory<a name="line.230"></a>
+<span class="sourceLineNo">231</span>            // as long as ppt filtering didn't remove some ppts.<a name="line.231"></a>
+<span class="sourceLineNo">232</span>            for (PptRelation rel : ppt.parents) {<a name="line.232"></a>
+<span class="sourceLineNo">233</span>              assert merge_ppts.get(rel.parent.name()) == rel.parent : ppt + " - " + rel;<a name="line.233"></a>
+<span class="sourceLineNo">234</span>            }<a name="line.234"></a>
+<span class="sourceLineNo">235</span>          }<a name="line.235"></a>
+<span class="sourceLineNo">236</span>        }<a name="line.236"></a>
+<span class="sourceLineNo">237</span>      }<a name="line.237"></a>
+<span class="sourceLineNo">238</span>      assert merge_ppts != null<a name="line.238"></a>
+<span class="sourceLineNo">239</span>          : "@AssumeAssertion(nullness): inv_files is non-empty, so for-loop body executed";<a name="line.239"></a>
+<span class="sourceLineNo">240</span><a name="line.240"></a>
+<span class="sourceLineNo">241</span>      // Remove all of the slices, equality sets, to start<a name="line.241"></a>
+<span class="sourceLineNo">242</span>      debugProgress.fine("Cleaning ppt map in preparation for merge");<a name="line.242"></a>
+<span class="sourceLineNo">243</span>      for (PptTopLevel ppt : merge_ppts.ppt_all_iterable()) {<a name="line.243"></a>
+<span class="sourceLineNo">244</span>        ppt.clean_for_merge();<a name="line.244"></a>
+<span class="sourceLineNo">245</span>      }<a name="line.245"></a>
+<span class="sourceLineNo">246</span><a name="line.246"></a>
+<span class="sourceLineNo">247</span>    } else {<a name="line.247"></a>
+<span class="sourceLineNo">248</span><a name="line.248"></a>
+<span class="sourceLineNo">249</span>      // Build the result pptmap from the specific decls file<a name="line.249"></a>
+<span class="sourceLineNo">250</span>      debugProgress.fine("Building result ppt map from decls file");<a name="line.250"></a>
+<span class="sourceLineNo">251</span>      Daikon.create_splitters(splitter_files);<a name="line.251"></a>
+<span class="sourceLineNo">252</span>      List&lt;File&gt; decl_files = new ArrayList&lt;&gt;();<a name="line.252"></a>
+<span class="sourceLineNo">253</span>      decl_files.add(decl_file);<a name="line.253"></a>
+<span class="sourceLineNo">254</span>      merge_ppts = FileIO.read_declaration_files(decl_files);<a name="line.254"></a>
+<span class="sourceLineNo">255</span>      merge_ppts.trimToSize();<a name="line.255"></a>
+<span class="sourceLineNo">256</span>      PptRelation.init_hierarchy(merge_ppts);<a name="line.256"></a>
+<span class="sourceLineNo">257</span>    }<a name="line.257"></a>
+<span class="sourceLineNo">258</span><a name="line.258"></a>
+<span class="sourceLineNo">259</span>    // Create a hierarchy between the merge exitNN points and the<a name="line.259"></a>
+<span class="sourceLineNo">260</span>    // corresponding points in each of the specified maps.  This<a name="line.260"></a>
+<span class="sourceLineNo">261</span>    // should only be created at the exitNN points (i.e., the leaves)<a name="line.261"></a>
+<span class="sourceLineNo">262</span>    // so that the normal processing will create the invariants at<a name="line.262"></a>
+<span class="sourceLineNo">263</span>    // upper points.<a name="line.263"></a>
+<span class="sourceLineNo">264</span>    debugProgress.fine("Building hierarchy between leaves of the maps");<a name="line.264"></a>
+<span class="sourceLineNo">265</span>    for (PptTopLevel ppt : merge_ppts.pptIterable()) {<a name="line.265"></a>
+<span class="sourceLineNo">266</span><a name="line.266"></a>
+<span class="sourceLineNo">267</span>      // Skip everything that is not a final exit point<a name="line.267"></a>
+<span class="sourceLineNo">268</span>      if (!ppt.ppt_name.isExitPoint()) {<a name="line.268"></a>
+<span class="sourceLineNo">269</span>        assert ppt.children.size() &gt; 0 : ppt;<a name="line.269"></a>
+<span class="sourceLineNo">270</span>        continue;<a name="line.270"></a>
+<span class="sourceLineNo">271</span>      }<a name="line.271"></a>
+<span class="sourceLineNo">272</span>      if (ppt.ppt_name.isCombinedExitPoint()) {<a name="line.272"></a>
+<span class="sourceLineNo">273</span>        assert ppt.children.size() &gt; 0 : ppt;<a name="line.273"></a>
+<span class="sourceLineNo">274</span>        continue;<a name="line.274"></a>
+<span class="sourceLineNo">275</span>      }<a name="line.275"></a>
+<span class="sourceLineNo">276</span><a name="line.276"></a>
+<span class="sourceLineNo">277</span>      // System.out.printf("Including ppt %s, %d children%n", ppt,<a name="line.277"></a>
+<span class="sourceLineNo">278</span>      //                   ppt.children.size());<a name="line.278"></a>
+<span class="sourceLineNo">279</span><a name="line.279"></a>
+<span class="sourceLineNo">280</span>      // Splitters should not have any children to begin with<a name="line.280"></a>
+<span class="sourceLineNo">281</span>      if (ppt.has_splitters()) {<a name="line.281"></a>
+<span class="sourceLineNo">282</span>        assert ppt.splitters != null; // because ppt.has_splitters() = true<a name="line.282"></a>
+<span class="sourceLineNo">283</span>        for (PptSplitter ppt_split : ppt.splitters) {<a name="line.283"></a>
+<span class="sourceLineNo">284</span>          for (PptTopLevel p : ppt_split.ppts) {<a name="line.284"></a>
+<span class="sourceLineNo">285</span>            assert p.children.size() == 0 : p;<a name="line.285"></a>
+<span class="sourceLineNo">286</span>          }<a name="line.286"></a>
+<span class="sourceLineNo">287</span>        }<a name="line.287"></a>
+<span class="sourceLineNo">288</span>      }<a name="line.288"></a>
+<span class="sourceLineNo">289</span><a name="line.289"></a>
+<span class="sourceLineNo">290</span>      // Loop over each of the input ppt maps, looking for the same ppt<a name="line.290"></a>
+<span class="sourceLineNo">291</span>      for (int j = 0; j &lt; pptmaps.size(); j++) {<a name="line.291"></a>
+<span class="sourceLineNo">292</span>        PptMap pmap = pptmaps.get(j);<a name="line.292"></a>
+<span class="sourceLineNo">293</span>        PptTopLevel child = pmap.get(ppt.name());<a name="line.293"></a>
+<span class="sourceLineNo">294</span>        // System.out.printf("found child %s from pmap %d%n", child, j);<a name="line.294"></a>
+<span class="sourceLineNo">295</span>        if (child == null) {<a name="line.295"></a>
+<span class="sourceLineNo">296</span>          continue;<a name="line.296"></a>
+<span class="sourceLineNo">297</span>        }<a name="line.297"></a>
+<span class="sourceLineNo">298</span>        if (child.equality_view == null) {<a name="line.298"></a>
+<span class="sourceLineNo">299</span>          System.out.println(<a name="line.299"></a>
+<span class="sourceLineNo">300</span>              "equality_view == null in child ppt: "<a name="line.300"></a>
+<span class="sourceLineNo">301</span>                  + child.name()<a name="line.301"></a>
+<span class="sourceLineNo">302</span>                  + " ("<a name="line.302"></a>
+<span class="sourceLineNo">303</span>                  + inv_files.get(j)<a name="line.303"></a>
+<span class="sourceLineNo">304</span>                  + ")");<a name="line.304"></a>
+<span class="sourceLineNo">305</span>        } else if (child.equality_view.invs == null) {<a name="line.305"></a>
+<span class="sourceLineNo">306</span>          System.out.println(<a name="line.306"></a>
+<span class="sourceLineNo">307</span>              "equality_view.invs == null in child ppt: "<a name="line.307"></a>
+<span class="sourceLineNo">308</span>                  + child.name()<a name="line.308"></a>
+<span class="sourceLineNo">309</span>                  + " ("<a name="line.309"></a>
+<span class="sourceLineNo">310</span>                  + inv_files.get(j)<a name="line.310"></a>
+<span class="sourceLineNo">311</span>                  + ")"<a name="line.311"></a>
+<span class="sourceLineNo">312</span>                  + " samples = "<a name="line.312"></a>
+<span class="sourceLineNo">313</span>                  + child.num_samples());<a name="line.313"></a>
+<span class="sourceLineNo">314</span>        }<a name="line.314"></a>
+<span class="sourceLineNo">315</span><a name="line.315"></a>
+<span class="sourceLineNo">316</span>        // Remove the equality invariants added during equality post<a name="line.316"></a>
+<span class="sourceLineNo">317</span>        // processing.  These are not over leaders and will cause problems<a name="line.317"></a>
+<span class="sourceLineNo">318</span>        // in the merge<a name="line.318"></a>
+<span class="sourceLineNo">319</span>        child.remove_equality_invariants();<a name="line.319"></a>
+<span class="sourceLineNo">320</span>        child.in_merge = false;<a name="line.320"></a>
+<span class="sourceLineNo">321</span><a name="line.321"></a>
+<span class="sourceLineNo">322</span>        // Remove implications, they don't merge correctly<a name="line.322"></a>
+<span class="sourceLineNo">323</span>        child.remove_implications();<a name="line.323"></a>
+<span class="sourceLineNo">324</span><a name="line.324"></a>
+<span class="sourceLineNo">325</span>        // If the ppt has splitters, attach the child's splitters to the<a name="line.325"></a>
+<span class="sourceLineNo">326</span>        // splitters.  Don't attach the ppt itself, as its invariants can<a name="line.326"></a>
+<span class="sourceLineNo">327</span>        // be built from the invariants in the splitters.<a name="line.327"></a>
+<span class="sourceLineNo">328</span>        if (ppt.has_splitters()) {<a name="line.328"></a>
+<span class="sourceLineNo">329</span>          assert ppt.splitters != null; // because ppt.has_splitters() = true<a name="line.329"></a>
+<span class="sourceLineNo">330</span>          setup_conditional_merge(ppt, child);<a name="line.330"></a>
+<span class="sourceLineNo">331</span>        } else {<a name="line.331"></a>
+<span class="sourceLineNo">332</span>          PptRelation.newMergeChildRel(ppt, child);<a name="line.332"></a>
+<span class="sourceLineNo">333</span>        }<a name="line.333"></a>
+<span class="sourceLineNo">334</span>      }<a name="line.334"></a>
+<span class="sourceLineNo">335</span><a name="line.335"></a>
+<span class="sourceLineNo">336</span>      // Make sure at least one child was found<a name="line.336"></a>
+<span class="sourceLineNo">337</span>      assert ppt.children.size() &gt; 0 : ppt;<a name="line.337"></a>
+<span class="sourceLineNo">338</span>      if (ppt.has_splitters()) {<a name="line.338"></a>
+<span class="sourceLineNo">339</span>        assert ppt.splitters != null; // because ppt.has_splitters() = true<a name="line.339"></a>
+<span class="sourceLineNo">340</span>        for (PptSplitter ppt_split : ppt.splitters) {<a name="line.340"></a>
+<span class="sourceLineNo">341</span>          for (PptTopLevel p : ppt_split.ppts) {<a name="line.341"></a>
+<span class="sourceLineNo">342</span>            assert p.children.size() &gt; 0 : p;<a name="line.342"></a>
+<span class="sourceLineNo">343</span>          }<a name="line.343"></a>
+<span class="sourceLineNo">344</span>        }<a name="line.344"></a>
+<span class="sourceLineNo">345</span>      }<a name="line.345"></a>
+<span class="sourceLineNo">346</span>    }<a name="line.346"></a>
+<span class="sourceLineNo">347</span><a name="line.347"></a>
+<span class="sourceLineNo">348</span>    // Check the resulting PptMap for consistency<a name="line.348"></a>
+<span class="sourceLineNo">349</span>    merge_ppts.repCheck();<a name="line.349"></a>
+<span class="sourceLineNo">350</span><a name="line.350"></a>
+<span class="sourceLineNo">351</span>    // Debug print the hierarchy is a more readable manner<a name="line.351"></a>
+<span class="sourceLineNo">352</span>    if (debug.isLoggable(Level.FINE)) {<a name="line.352"></a>
+<span class="sourceLineNo">353</span>      debug.fine("PPT Hierarchy");<a name="line.353"></a>
+<span class="sourceLineNo">354</span>      for (PptTopLevel ppt : merge_ppts.pptIterable()) {<a name="line.354"></a>
+<span class="sourceLineNo">355</span>        if (ppt.parents.size() == 0) ppt.debug_print_tree(debug, 0, null);<a name="line.355"></a>
+<span class="sourceLineNo">356</span>      }<a name="line.356"></a>
+<span class="sourceLineNo">357</span>    }<a name="line.357"></a>
+<span class="sourceLineNo">358</span><a name="line.358"></a>
+<span class="sourceLineNo">359</span>    // Merge the invariants<a name="line.359"></a>
+<span class="sourceLineNo">360</span>    debugProgress.fine("Merging invariants");<a name="line.360"></a>
+<span class="sourceLineNo">361</span>    Daikon.createUpperPpts(merge_ppts);<a name="line.361"></a>
+<span class="sourceLineNo">362</span><a name="line.362"></a>
+<span class="sourceLineNo">363</span>    // Equality post processing<a name="line.363"></a>
+<span class="sourceLineNo">364</span>    debugProgress.fine("Equality Post Processing");<a name="line.364"></a>
+<span class="sourceLineNo">365</span>    for (PptTopLevel ppt : merge_ppts.ppt_all_iterable()) {<a name="line.365"></a>
+<span class="sourceLineNo">366</span>      ppt.postProcessEquality();<a name="line.366"></a>
+<span class="sourceLineNo">367</span>    }<a name="line.367"></a>
+<span class="sourceLineNo">368</span><a name="line.368"></a>
+<span class="sourceLineNo">369</span>    // Implications<a name="line.369"></a>
+<span class="sourceLineNo">370</span>    long startTime = System.nanoTime();<a name="line.370"></a>
+<span class="sourceLineNo">371</span>    // System.out.println("Creating implications ");<a name="line.371"></a>
+<span class="sourceLineNo">372</span>    debugProgress.fine("Adding Implications ... ");<a name="line.372"></a>
+<span class="sourceLineNo">373</span>    for (PptTopLevel ppt : merge_ppts.pptIterable()) {<a name="line.373"></a>
+<span class="sourceLineNo">374</span>      if (ppt.num_samples() &gt; 0) ppt.addImplications();<a name="line.374"></a>
+<span class="sourceLineNo">375</span>    }<a name="line.375"></a>
+<span class="sourceLineNo">376</span>    long duration = System.nanoTime() - startTime;<a name="line.376"></a>
+<span class="sourceLineNo">377</span>    debugProgress.fine("Time spent in implications: " + TimeUnit.NANOSECONDS.toSeconds(duration));<a name="line.377"></a>
+<span class="sourceLineNo">378</span><a name="line.378"></a>
+<span class="sourceLineNo">379</span>    // Remove the PptRelation links so that when the file is written<a name="line.379"></a>
+<span class="sourceLineNo">380</span>    // out it only includes the new information<a name="line.380"></a>
+<span class="sourceLineNo">381</span>    for (PptTopLevel ppt : merge_ppts.pptIterable()) {<a name="line.381"></a>
+<span class="sourceLineNo">382</span>      if (!ppt.ppt_name.isExitPoint()) {<a name="line.382"></a>
+<span class="sourceLineNo">383</span>        continue;<a name="line.383"></a>
+<span class="sourceLineNo">384</span>      }<a name="line.384"></a>
+<span class="sourceLineNo">385</span>      if (ppt.ppt_name.isCombinedExitPoint()) {<a name="line.385"></a>
+<span class="sourceLineNo">386</span>        continue;<a name="line.386"></a>
+<span class="sourceLineNo">387</span>      }<a name="line.387"></a>
+<span class="sourceLineNo">388</span>      ppt.children.clear();<a name="line.388"></a>
+<span class="sourceLineNo">389</span>      for (PptConditional cond : ppt.cond_iterable()) {<a name="line.389"></a>
+<span class="sourceLineNo">390</span>        cond.children.clear();<a name="line.390"></a>
+<span class="sourceLineNo">391</span>      }<a name="line.391"></a>
+<span class="sourceLineNo">392</span>    }<a name="line.392"></a>
+<span class="sourceLineNo">393</span><a name="line.393"></a>
+<span class="sourceLineNo">394</span>    // Write serialized output<a name="line.394"></a>
+<span class="sourceLineNo">395</span>    debugProgress.fine("Writing Output");<a name="line.395"></a>
+<span class="sourceLineNo">396</span>    if (output_inv_file != null) {<a name="line.396"></a>
+<span class="sourceLineNo">397</span>      try {<a name="line.397"></a>
+<span class="sourceLineNo">398</span>        FileIO.write_serialized_pptmap(merge_ppts, output_inv_file);<a name="line.398"></a>
+<span class="sourceLineNo">399</span>      } catch (IOException e) {<a name="line.399"></a>
+<span class="sourceLineNo">400</span>        throw new RuntimeException(<a name="line.400"></a>
+<span class="sourceLineNo">401</span>            "Error while writing .inv file '" + output_inv_file + "': " + e.toString());<a name="line.401"></a>
+<span class="sourceLineNo">402</span>      }<a name="line.402"></a>
+<span class="sourceLineNo">403</span>    } else {<a name="line.403"></a>
+<span class="sourceLineNo">404</span>      // Print the invariants<a name="line.404"></a>
+<span class="sourceLineNo">405</span>      PrintInvariants.print_invariants(merge_ppts);<a name="line.405"></a>
+<span class="sourceLineNo">406</span>    }<a name="line.406"></a>
+<span class="sourceLineNo">407</span>  }<a name="line.407"></a>
+<span class="sourceLineNo">408</span><a name="line.408"></a>
+<span class="sourceLineNo">409</span>  /**<a name="line.409"></a>
+<span class="sourceLineNo">410</span>   * Ses up the specified relation beteween each of the conditionals in ppt and the matching<a name="line.410"></a>
+<span class="sourceLineNo">411</span>   * conditionals in child. Each must have the same number of splitters setup in the same order. The<a name="line.411"></a>
+<span class="sourceLineNo">412</span>   * splitter match can't be checked because splitters can't be read back in.<a name="line.412"></a>
+<span class="sourceLineNo">413</span>   */<a name="line.413"></a>
+<span class="sourceLineNo">414</span>  private static void setup_conditional_merge(PptTopLevel ppt, PptTopLevel child) {<a name="line.414"></a>
+<span class="sourceLineNo">415</span><a name="line.415"></a>
+<span class="sourceLineNo">416</span>    // Both ppt and child should have splitters<a name="line.416"></a>
+<span class="sourceLineNo">417</span>    if (ppt.has_splitters() != child.has_splitters()) {<a name="line.417"></a>
+<span class="sourceLineNo">418</span>      throw new Error(<a name="line.418"></a>
+<span class="sourceLineNo">419</span>          "Merge ppt "<a name="line.419"></a>
+<span class="sourceLineNo">420</span>              + ppt.name<a name="line.420"></a>
+<span class="sourceLineNo">421</span>              + (ppt.has_splitters() ? " has " : "doesn't have ")<a name="line.421"></a>
+<span class="sourceLineNo">422</span>              + "splitters, but child ppt "<a name="line.422"></a>
+<span class="sourceLineNo">423</span>              + child.name<a name="line.423"></a>
+<span class="sourceLineNo">424</span>              + (child.has_splitters() ? " does" : " doesn't"));<a name="line.424"></a>
+<span class="sourceLineNo">425</span>    }<a name="line.425"></a>
+<span class="sourceLineNo">426</span><a name="line.426"></a>
+<span class="sourceLineNo">427</span>    // Nothing to do if there are no splitters here<a name="line.427"></a>
+<span class="sourceLineNo">428</span>    if (!ppt.has_splitters()) {<a name="line.428"></a>
+<span class="sourceLineNo">429</span>      return;<a name="line.429"></a>
+<span class="sourceLineNo">430</span>    }<a name="line.430"></a>
+<span class="sourceLineNo">431</span><a name="line.431"></a>
+<span class="sourceLineNo">432</span>    assert child.splitters != null<a name="line.432"></a>
+<span class="sourceLineNo">433</span>        : "@AssumeAssertion(nullness): correlated: ppt.has_splitters() == child.has_splitters(), and ppt.has_splitters() == true";<a name="line.433"></a>
+<span class="sourceLineNo">434</span><a name="line.434"></a>
+<span class="sourceLineNo">435</span>    // Both ppt and child should have the same number of splitters<a name="line.435"></a>
+<span class="sourceLineNo">436</span>    if (ppt.splitters.size() != child.splitters.size()) {<a name="line.436"></a>
+<span class="sourceLineNo">437</span>      throw new Error(<a name="line.437"></a>
+<span class="sourceLineNo">438</span>          "Merge ppt "<a name="line.438"></a>
+<span class="sourceLineNo">439</span>              + ppt.name<a name="line.439"></a>
+<span class="sourceLineNo">440</span>              + " has "<a name="line.440"></a>
+<span class="sourceLineNo">441</span>              + ((ppt.splitters.size() &gt; child.splitters.size()) ? "more" : "fewer")<a name="line.441"></a>
+<span class="sourceLineNo">442</span>              + " splitters ("<a name="line.442"></a>
+<span class="sourceLineNo">443</span>              + ppt.splitters.size()<a name="line.443"></a>
+<span class="sourceLineNo">444</span>              + ") than child ppt "<a name="line.444"></a>
+<span class="sourceLineNo">445</span>              + child.name<a name="line.445"></a>
+<span class="sourceLineNo">446</span>              + " ("<a name="line.446"></a>
+<span class="sourceLineNo">447</span>              + child.splitters.size()<a name="line.447"></a>
+<span class="sourceLineNo">448</span>              + ")");<a name="line.448"></a>
+<span class="sourceLineNo">449</span>    }<a name="line.449"></a>
+<span class="sourceLineNo">450</span><a name="line.450"></a>
+<span class="sourceLineNo">451</span>    // Create a relation from each conditional ppt to its corresponding<a name="line.451"></a>
+<span class="sourceLineNo">452</span>    // conditional ppt in the child.<a name="line.452"></a>
+<span class="sourceLineNo">453</span>    for (int ii = 0; ii &lt; ppt.splitters.size(); ii++) {<a name="line.453"></a>
+<span class="sourceLineNo">454</span>      PptSplitter ppt_split = ppt.splitters.get(ii);<a name="line.454"></a>
+<span class="sourceLineNo">455</span>      PptSplitter child_split = child.splitters.get(ii);<a name="line.455"></a>
+<span class="sourceLineNo">456</span>      for (int jj = 0; jj &lt; ppt_split.ppts.length; jj++) {<a name="line.456"></a>
+<span class="sourceLineNo">457</span>        child_split.ppts[jj].remove_equality_invariants();<a name="line.457"></a>
+<span class="sourceLineNo">458</span>        child_split.ppts[jj].in_merge = false;<a name="line.458"></a>
+<span class="sourceLineNo">459</span>        PptRelation.newMergeChildRel(ppt_split.ppts[jj], child_split.ppts[jj]);<a name="line.459"></a>
+<span class="sourceLineNo">460</span>      }<a name="line.460"></a>
+<span class="sourceLineNo">461</span>    }<a name="line.461"></a>
+<span class="sourceLineNo">462</span>  }<a name="line.462"></a>
+<span class="sourceLineNo">463</span>}<a name="line.463"></a>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</pre>
+</div>
+</body>
+</html>

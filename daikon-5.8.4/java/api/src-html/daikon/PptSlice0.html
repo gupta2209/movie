@@ -1,0 +1,332 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<html lang="en">
+<head><link rel="icon" href="../../daikon-favicon.png" type="image/png"/>
+<title>Source code</title>
+<link rel="stylesheet" type="text/css" href="../../stylesheet.css" title="Style">
+</head>
+<body>
+<div class="sourceContainer">
+<pre><span class="sourceLineNo">001</span>package daikon;<a name="line.1"></a>
+<span class="sourceLineNo">002</span><a name="line.2"></a>
+<span class="sourceLineNo">003</span>import static daikon.tools.nullness.NullnessUtil.castNonNullDeep;<a name="line.3"></a>
+<span class="sourceLineNo">004</span><a name="line.4"></a>
+<span class="sourceLineNo">005</span>import daikon.inv.Implication;<a name="line.5"></a>
+<span class="sourceLineNo">006</span>import daikon.inv.Invariant;<a name="line.6"></a>
+<span class="sourceLineNo">007</span>import java.util.HashSet;<a name="line.7"></a>
+<span class="sourceLineNo">008</span>import java.util.List;<a name="line.8"></a>
+<span class="sourceLineNo">009</span>import org.checkerframework.checker.initialization.qual.UnknownInitialization;<a name="line.9"></a>
+<span class="sourceLineNo">010</span>import org.checkerframework.checker.lock.qual.GuardSatisfied;<a name="line.10"></a>
+<span class="sourceLineNo">011</span>import org.checkerframework.checker.nullness.qual.EnsuresNonNullIf;<a name="line.11"></a>
+<span class="sourceLineNo">012</span>import org.checkerframework.checker.nullness.qual.Nullable;<a name="line.12"></a>
+<span class="sourceLineNo">013</span>import org.checkerframework.dataflow.qual.Pure;<a name="line.13"></a>
+<span class="sourceLineNo">014</span><a name="line.14"></a>
+<span class="sourceLineNo">015</span>// This is a fake PptSlice for use with Implication invariants.<a name="line.15"></a>
+<span class="sourceLineNo">016</span><a name="line.16"></a>
+<span class="sourceLineNo">017</span>// - The implication invariants at a program point are grouped into a<a name="line.17"></a>
+<span class="sourceLineNo">018</span>// single PptSlice0 with no variables<a name="line.18"></a>
+<span class="sourceLineNo">019</span><a name="line.19"></a>
+<span class="sourceLineNo">020</span>// - In order to output pre-state invariants as if they were<a name="line.20"></a>
+<span class="sourceLineNo">021</span>// post-state, or OBJECT invariants as if they applied to a particular<a name="line.21"></a>
+<span class="sourceLineNo">022</span>// parameter, we construct a PptSlice0 whose VarInfos have had their<a name="line.22"></a>
+<span class="sourceLineNo">023</span>// names tweaked, and temporarily use that as the invariant's ppt.<a name="line.23"></a>
+<span class="sourceLineNo">024</span><a name="line.24"></a>
+<span class="sourceLineNo">025</span>public class PptSlice0 extends PptSlice {<a name="line.25"></a>
+<span class="sourceLineNo">026</span>  // We are Serializable, so we specify a version to allow changes to<a name="line.26"></a>
+<span class="sourceLineNo">027</span>  // method signatures without breaking serialization.  If you add or<a name="line.27"></a>
+<span class="sourceLineNo">028</span>  // remove fields, you should change this number to the current date.<a name="line.28"></a>
+<span class="sourceLineNo">029</span>  static final long serialVersionUID = 20020122L;<a name="line.29"></a>
+<span class="sourceLineNo">030</span><a name="line.30"></a>
+<span class="sourceLineNo">031</span>  PptSlice0(PptTopLevel parent) {<a name="line.31"></a>
+<span class="sourceLineNo">032</span>    super(parent, new VarInfo[0]);<a name="line.32"></a>
+<span class="sourceLineNo">033</span>  }<a name="line.33"></a>
+<span class="sourceLineNo">034</span><a name="line.34"></a>
+<span class="sourceLineNo">035</span>  @Override<a name="line.35"></a>
+<span class="sourceLineNo">036</span>  public final int arity(@UnknownInitialization(PptSlice.class) PptSlice0 this) {<a name="line.36"></a>
+<span class="sourceLineNo">037</span>    return 0;<a name="line.37"></a>
+<span class="sourceLineNo">038</span>  }<a name="line.38"></a>
+<span class="sourceLineNo">039</span><a name="line.39"></a>
+<span class="sourceLineNo">040</span>  // Make a fake slice whose variables are the same as the ones in<a name="line.40"></a>
+<span class="sourceLineNo">041</span>  // sliceTemplate and at the same PptTopLevel, but marked as prestate<a name="line.41"></a>
+<span class="sourceLineNo">042</span>  // (i.e., orig(x) rather than x) and transplanted to origSlice.<a name="line.42"></a>
+<span class="sourceLineNo">043</span>  public static PptSlice makeFakePrestate(PptSlice sliceTemplate) {<a name="line.43"></a>
+<span class="sourceLineNo">044</span>    PptSlice0 fake = new PptSlice0(sliceTemplate.parent);<a name="line.44"></a>
+<span class="sourceLineNo">045</span>    fake.var_infos = new /*NNC:@MonotonicNonNull*/ VarInfo[sliceTemplate.var_infos.length];<a name="line.45"></a>
+<span class="sourceLineNo">046</span>    for (int i = 0; i &lt; fake.var_infos.length; i++) {<a name="line.46"></a>
+<span class="sourceLineNo">047</span>      fake.var_infos[i] = VarInfo.origVarInfo(sliceTemplate.var_infos[i]);<a name="line.47"></a>
+<span class="sourceLineNo">048</span>    }<a name="line.48"></a>
+<span class="sourceLineNo">049</span>    fake.var_infos = castNonNullDeep(fake.var_infos); // https://tinyurl.com/cfissue/986<a name="line.49"></a>
+<span class="sourceLineNo">050</span>    return fake;<a name="line.50"></a>
+<span class="sourceLineNo">051</span>  }<a name="line.51"></a>
+<span class="sourceLineNo">052</span><a name="line.52"></a>
+<span class="sourceLineNo">053</span>  // We trade space for time by keeping a hash table of all the<a name="line.53"></a>
+<span class="sourceLineNo">054</span>  // implications (they're also stored as a vector in invs) so we can<a name="line.54"></a>
+<span class="sourceLineNo">055</span>  // efficiently avoid adding implications more than once.<a name="line.55"></a>
+<span class="sourceLineNo">056</span><a name="line.56"></a>
+<span class="sourceLineNo">057</span>  // This should not be transient:  more implications can be created during<a name="line.57"></a>
+<span class="sourceLineNo">058</span>  // printing, for instance due to guarding.<a name="line.58"></a>
+<span class="sourceLineNo">059</span>  private transient HashSet&lt;ImplicationWrapper&gt; invariantsSeen = new HashSet&lt;&gt;();<a name="line.59"></a>
+<span class="sourceLineNo">060</span><a name="line.60"></a>
+<span class="sourceLineNo">061</span>  // In lieu of a readResolve method.<a name="line.61"></a>
+<span class="sourceLineNo">062</span>  private void initInvariantsSeen() {<a name="line.62"></a>
+<span class="sourceLineNo">063</span>    if (invariantsSeen == null) {<a name="line.63"></a>
+<span class="sourceLineNo">064</span>      invariantsSeen = new HashSet&lt;ImplicationWrapper&gt;();<a name="line.64"></a>
+<span class="sourceLineNo">065</span>      for (Invariant inv : invs) {<a name="line.65"></a>
+<span class="sourceLineNo">066</span>        invariantsSeen.add(new ImplicationWrapper((Implication) inv));<a name="line.66"></a>
+<span class="sourceLineNo">067</span>      }<a name="line.67"></a>
+<span class="sourceLineNo">068</span>    }<a name="line.68"></a>
+<span class="sourceLineNo">069</span>  }<a name="line.69"></a>
+<span class="sourceLineNo">070</span><a name="line.70"></a>
+<span class="sourceLineNo">071</span>  @SuppressWarnings("nullness") // reinitialization<a name="line.71"></a>
+<span class="sourceLineNo">072</span>  private void reinitInvariantsSeen() {<a name="line.72"></a>
+<span class="sourceLineNo">073</span>    invariantsSeen = null;<a name="line.73"></a>
+<span class="sourceLineNo">074</span>    initInvariantsSeen();<a name="line.74"></a>
+<span class="sourceLineNo">075</span>  }<a name="line.75"></a>
+<span class="sourceLineNo">076</span><a name="line.76"></a>
+<span class="sourceLineNo">077</span>  public void checkRep() {<a name="line.77"></a>
+<span class="sourceLineNo">078</span>    if (invariantsSeen != null &amp;&amp; invs.size() != invariantsSeen.size()) {<a name="line.78"></a>
+<span class="sourceLineNo">079</span>      assert invs.size() == invariantsSeen.size()<a name="line.79"></a>
+<span class="sourceLineNo">080</span>          : "invs.size()=" + invs.size() + ", invariantsSeen.size()=" + invariantsSeen.size();<a name="line.80"></a>
+<span class="sourceLineNo">081</span>    }<a name="line.81"></a>
+<span class="sourceLineNo">082</span>    assert invariantsSeen == null || invs.size() == invariantsSeen.size();<a name="line.82"></a>
+<span class="sourceLineNo">083</span>  }<a name="line.83"></a>
+<span class="sourceLineNo">084</span><a name="line.84"></a>
+<span class="sourceLineNo">085</span>  /**<a name="line.85"></a>
+<span class="sourceLineNo">086</span>   * The invariant is typically an Implication; but PptSlice0 can contain other joiners than<a name="line.86"></a>
+<span class="sourceLineNo">087</span>   * implications, such as "and" or "or". That feature isn't used as of November 2003.<a name="line.87"></a>
+<span class="sourceLineNo">088</span>   */<a name="line.88"></a>
+<span class="sourceLineNo">089</span>  @Override<a name="line.89"></a>
+<span class="sourceLineNo">090</span>  public void addInvariant(Invariant inv) {<a name="line.90"></a>
+<span class="sourceLineNo">091</span>    assert inv != null;<a name="line.91"></a>
+<span class="sourceLineNo">092</span>    assert inv instanceof Implication;<a name="line.92"></a>
+<span class="sourceLineNo">093</span>    // checkRep();<a name="line.93"></a>
+<span class="sourceLineNo">094</span>    // assert ! hasImplication((Implication) inv);<a name="line.94"></a>
+<span class="sourceLineNo">095</span>    initInvariantsSeen();<a name="line.95"></a>
+<span class="sourceLineNo">096</span>    invs.add(inv);<a name="line.96"></a>
+<span class="sourceLineNo">097</span>    invariantsSeen.add(new ImplicationWrapper((Implication) inv));<a name="line.97"></a>
+<span class="sourceLineNo">098</span>    // checkRep();<a name="line.98"></a>
+<span class="sourceLineNo">099</span>  }<a name="line.99"></a>
+<span class="sourceLineNo">100</span><a name="line.100"></a>
+<span class="sourceLineNo">101</span>  @Override<a name="line.101"></a>
+<span class="sourceLineNo">102</span>  public void removeInvariant(Invariant inv) {<a name="line.102"></a>
+<span class="sourceLineNo">103</span>    assert inv != null;<a name="line.103"></a>
+<span class="sourceLineNo">104</span>    assert inv instanceof Implication;<a name="line.104"></a>
+<span class="sourceLineNo">105</span>    // checkRep();<a name="line.105"></a>
+<span class="sourceLineNo">106</span>    // assert hasImplication((Implication) inv);<a name="line.106"></a>
+<span class="sourceLineNo">107</span>    initInvariantsSeen();<a name="line.107"></a>
+<span class="sourceLineNo">108</span>    invs.remove(inv);<a name="line.108"></a>
+<span class="sourceLineNo">109</span>    invariantsSeen.remove(new ImplicationWrapper((Implication) inv));<a name="line.109"></a>
+<span class="sourceLineNo">110</span>    // checkRep();<a name="line.110"></a>
+<span class="sourceLineNo">111</span>  }<a name="line.111"></a>
+<span class="sourceLineNo">112</span><a name="line.112"></a>
+<span class="sourceLineNo">113</span>  // This can be called with very long lists by the conditionals code.<a name="line.113"></a>
+<span class="sourceLineNo">114</span>  // At least until that's fixed, it's important for it not to be<a name="line.114"></a>
+<span class="sourceLineNo">115</span>  // quadratic.<a name="line.115"></a>
+<span class="sourceLineNo">116</span>  @Override<a name="line.116"></a>
+<span class="sourceLineNo">117</span>  public void removeInvariants(List&lt;Invariant&gt; to_remove) {<a name="line.117"></a>
+<span class="sourceLineNo">118</span>    if (to_remove.size() &lt; 10) {<a name="line.118"></a>
+<span class="sourceLineNo">119</span>      for (Invariant trinv : to_remove) {<a name="line.119"></a>
+<span class="sourceLineNo">120</span>        removeInvariant(trinv);<a name="line.120"></a>
+<span class="sourceLineNo">121</span>      }<a name="line.121"></a>
+<span class="sourceLineNo">122</span>    } else {<a name="line.122"></a>
+<span class="sourceLineNo">123</span>      invs.removeAll(to_remove);<a name="line.123"></a>
+<span class="sourceLineNo">124</span>      if (to_remove.size() &gt; invariantsSeen.size() / 2) {<a name="line.124"></a>
+<span class="sourceLineNo">125</span>        // Faster to throw away and recreate<a name="line.125"></a>
+<span class="sourceLineNo">126</span>        reinitInvariantsSeen();<a name="line.126"></a>
+<span class="sourceLineNo">127</span>      } else {<a name="line.127"></a>
+<span class="sourceLineNo">128</span>        // Faster to update<a name="line.128"></a>
+<span class="sourceLineNo">129</span>        for (Invariant trinv : to_remove) {<a name="line.129"></a>
+<span class="sourceLineNo">130</span>          invariantsSeen.remove(new ImplicationWrapper((Implication) trinv));<a name="line.130"></a>
+<span class="sourceLineNo">131</span>        }<a name="line.131"></a>
+<span class="sourceLineNo">132</span>      }<a name="line.132"></a>
+<span class="sourceLineNo">133</span>    }<a name="line.133"></a>
+<span class="sourceLineNo">134</span>  }<a name="line.134"></a>
+<span class="sourceLineNo">135</span><a name="line.135"></a>
+<span class="sourceLineNo">136</span>  public boolean hasImplication(Implication imp) {<a name="line.136"></a>
+<span class="sourceLineNo">137</span>    initInvariantsSeen();<a name="line.137"></a>
+<span class="sourceLineNo">138</span>    return invariantsSeen.contains(new ImplicationWrapper(imp));<a name="line.138"></a>
+<span class="sourceLineNo">139</span>  }<a name="line.139"></a>
+<span class="sourceLineNo">140</span><a name="line.140"></a>
+<span class="sourceLineNo">141</span>  // // For debugging only<a name="line.141"></a>
+<span class="sourceLineNo">142</span>  // public Implication getImplication(Implication imp) {<a name="line.142"></a>
+<span class="sourceLineNo">143</span>  //   initInvariantsSeen();<a name="line.143"></a>
+<span class="sourceLineNo">144</span>  //   ImplicationWrapper resultWrapper<a name="line.144"></a>
+<span class="sourceLineNo">145</span>  //     = (ImplicationWrapper) UtilPlume.getFromSet(<a name="line.145"></a>
+<span class="sourceLineNo">146</span>  //              invariantsSeen, new ImplicationWrapper(imp));<a name="line.146"></a>
+<span class="sourceLineNo">147</span>  //   if (resultWrapper == null) {<a name="line.147"></a>
+<span class="sourceLineNo">148</span>  //     return null;<a name="line.148"></a>
+<span class="sourceLineNo">149</span>  //   }<a name="line.149"></a>
+<span class="sourceLineNo">150</span>  //   return (Implication) resultWrapper.theImp;<a name="line.150"></a>
+<span class="sourceLineNo">151</span>  // }<a name="line.151"></a>
+<span class="sourceLineNo">152</span><a name="line.152"></a>
+<span class="sourceLineNo">153</span>  // We'd like to use a more sophisticated equality check and hashCode<a name="line.153"></a>
+<span class="sourceLineNo">154</span>  // for implications when they appear in the invariantsSeen HashSet,<a name="line.154"></a>
+<span class="sourceLineNo">155</span>  // but not anywhere else, so we make wrapper objects with the<a name="line.155"></a>
+<span class="sourceLineNo">156</span>  // desired methods to go directly in the set.<a name="line.156"></a>
+<span class="sourceLineNo">157</span><a name="line.157"></a>
+<span class="sourceLineNo">158</span>  // Not "implements serializable":  If this is serializable, then the hash<a name="line.158"></a>
+<span class="sourceLineNo">159</span>  // set tries to get the hash codes of all the invariants when it<a name="line.159"></a>
+<span class="sourceLineNo">160</span>  // reads them in, but their format methods croak when they couldn't<a name="line.160"></a>
+<span class="sourceLineNo">161</span>  // get their varInfos.<a name="line.161"></a>
+<span class="sourceLineNo">162</span><a name="line.162"></a>
+<span class="sourceLineNo">163</span>  private static final class ImplicationWrapper {<a name="line.163"></a>
+<span class="sourceLineNo">164</span><a name="line.164"></a>
+<span class="sourceLineNo">165</span>    public Implication theImp;<a name="line.165"></a>
+<span class="sourceLineNo">166</span>    // hashCode is cached to make equality checks faster.<a name="line.166"></a>
+<span class="sourceLineNo">167</span>    private int hashCode;<a name="line.167"></a>
+<span class="sourceLineNo">168</span><a name="line.168"></a>
+<span class="sourceLineNo">169</span>    public ImplicationWrapper(Implication theImp) {<a name="line.169"></a>
+<span class="sourceLineNo">170</span>      this.theImp = theImp;<a name="line.170"></a>
+<span class="sourceLineNo">171</span>      // this.format = theImp.format();<a name="line.171"></a>
+<span class="sourceLineNo">172</span>      this.hashCode = 0;<a name="line.172"></a>
+<span class="sourceLineNo">173</span>    }<a name="line.173"></a>
+<span class="sourceLineNo">174</span><a name="line.174"></a>
+<span class="sourceLineNo">175</span>    // Abstracted out to permit use of a cached value<a name="line.175"></a>
+<span class="sourceLineNo">176</span>    private String format(@GuardSatisfied ImplicationWrapper this) {<a name="line.176"></a>
+<span class="sourceLineNo">177</span>      // return format;<a name="line.177"></a>
+<span class="sourceLineNo">178</span>      return theImp.format();<a name="line.178"></a>
+<span class="sourceLineNo">179</span>      // return theImp.repr();<a name="line.179"></a>
+<span class="sourceLineNo">180</span>    }<a name="line.180"></a>
+<span class="sourceLineNo">181</span><a name="line.181"></a>
+<span class="sourceLineNo">182</span>    @Pure<a name="line.182"></a>
+<span class="sourceLineNo">183</span>    @Override<a name="line.183"></a>
+<span class="sourceLineNo">184</span>    public int hashCode(@GuardSatisfied ImplicationWrapper this) {<a name="line.184"></a>
+<span class="sourceLineNo">185</span>      if (hashCode == 0) {<a name="line.185"></a>
+<span class="sourceLineNo">186</span>        hashCode = format().hashCode();<a name="line.186"></a>
+<span class="sourceLineNo">187</span>        // hashCode = (theImp.iff ? 1 : 0);<a name="line.187"></a>
+<span class="sourceLineNo">188</span>        // hashCode = 37 * hashCode + theImp.predicate().getClass().hashCode();<a name="line.188"></a>
+<span class="sourceLineNo">189</span>        // hashCode = 37 * hashCode + theImp.consequent().getClass().hashCode();<a name="line.189"></a>
+<span class="sourceLineNo">190</span>      }<a name="line.190"></a>
+<span class="sourceLineNo">191</span>      return hashCode;<a name="line.191"></a>
+<span class="sourceLineNo">192</span>    }<a name="line.192"></a>
+<span class="sourceLineNo">193</span><a name="line.193"></a>
+<span class="sourceLineNo">194</span>    // Returns the value of "isSameInvariant()".<a name="line.194"></a>
+<span class="sourceLineNo">195</span>    @EnsuresNonNullIf(result = true, expression = "#1")<a name="line.195"></a>
+<span class="sourceLineNo">196</span>    @Pure<a name="line.196"></a>
+<span class="sourceLineNo">197</span>    @Override<a name="line.197"></a>
+<span class="sourceLineNo">198</span>    public boolean equals(<a name="line.198"></a>
+<span class="sourceLineNo">199</span>        @GuardSatisfied ImplicationWrapper this, @GuardSatisfied @Nullable Object o) {<a name="line.199"></a>
+<span class="sourceLineNo">200</span>      if (o == null) {<a name="line.200"></a>
+<span class="sourceLineNo">201</span>        return false;<a name="line.201"></a>
+<span class="sourceLineNo">202</span>      }<a name="line.202"></a>
+<span class="sourceLineNo">203</span>      assert o instanceof ImplicationWrapper;<a name="line.203"></a>
+<span class="sourceLineNo">204</span>      ImplicationWrapper other = (ImplicationWrapper) o;<a name="line.204"></a>
+<span class="sourceLineNo">205</span>      if (hashCode() != other.hashCode()) {<a name="line.205"></a>
+<span class="sourceLineNo">206</span>        return false;<a name="line.206"></a>
+<span class="sourceLineNo">207</span>      }<a name="line.207"></a>
+<span class="sourceLineNo">208</span>      boolean same_eq = theImp.isSameInvariant(other.theImp);<a name="line.208"></a>
+<span class="sourceLineNo">209</span><a name="line.209"></a>
+<span class="sourceLineNo">210</span>      // For debugging, look for differences between the format based check<a name="line.210"></a>
+<span class="sourceLineNo">211</span>      // and the isSameInvariant check.  Note that there are certain<a name="line.211"></a>
+<span class="sourceLineNo">212</span>      // invariants that print identically but are internally different:<a name="line.212"></a>
+<span class="sourceLineNo">213</span>      // "this.theArray[this.topOfStack..] ==<a name="line.213"></a>
+<span class="sourceLineNo">214</span>      // this.theArray[this.topOfStack..]" can be either SeqSeqIntEqual or<a name="line.214"></a>
+<span class="sourceLineNo">215</span>      // PairwiseLinearBinary, and "(return != null) ==&gt; (return.getClass()<a name="line.215"></a>
+<span class="sourceLineNo">216</span>      // != this.theArray.getClass())" can be either an Implication or a<a name="line.216"></a>
+<span class="sourceLineNo">217</span>      // guarded invariant.<a name="line.217"></a>
+<span class="sourceLineNo">218</span>      if (false) {<a name="line.218"></a>
+<span class="sourceLineNo">219</span>        boolean fmt_eq = format().equals(other.format());<a name="line.219"></a>
+<span class="sourceLineNo">220</span>        if (!(!same_eq || fmt_eq)) {<a name="line.220"></a>
+<span class="sourceLineNo">221</span>          System.out.println("imp1 = " + theImp.format());<a name="line.221"></a>
+<span class="sourceLineNo">222</span>          System.out.println("imp2 = " + other.theImp.format());<a name="line.222"></a>
+<span class="sourceLineNo">223</span>          System.out.println("fmt_eq = " + fmt_eq + " same_eq = " + same_eq);<a name="line.223"></a>
+<span class="sourceLineNo">224</span>          System.out.println("lefteq = " + theImp.left.isSameInvariant(other.theImp.left));<a name="line.224"></a>
+<span class="sourceLineNo">225</span>          System.out.println("righteq = " + theImp.right.isSameInvariant(other.theImp.right));<a name="line.225"></a>
+<span class="sourceLineNo">226</span>          System.out.println(<a name="line.226"></a>
+<span class="sourceLineNo">227</span>              "right class = " + theImp.right.getClass() + "/" + other.theImp.right.getClass());<a name="line.227"></a>
+<span class="sourceLineNo">228</span>          // throw new Error();<a name="line.228"></a>
+<span class="sourceLineNo">229</span>        }<a name="line.229"></a>
+<span class="sourceLineNo">230</span>        assert !same_eq || fmt_eq;<a name="line.230"></a>
+<span class="sourceLineNo">231</span>      }<a name="line.231"></a>
+<span class="sourceLineNo">232</span>      return same_eq;<a name="line.232"></a>
+<span class="sourceLineNo">233</span>    }<a name="line.233"></a>
+<span class="sourceLineNo">234</span>  }<a name="line.234"></a>
+<span class="sourceLineNo">235</span><a name="line.235"></a>
+<span class="sourceLineNo">236</span>  // I need to figure out how to set these.<a name="line.236"></a>
+<span class="sourceLineNo">237</span>  @Override<a name="line.237"></a>
+<span class="sourceLineNo">238</span>  public int num_samples(@UnknownInitialization @GuardSatisfied PptSlice0 this) {<a name="line.238"></a>
+<span class="sourceLineNo">239</span>    return 2222;<a name="line.239"></a>
+<span class="sourceLineNo">240</span>  }<a name="line.240"></a>
+<span class="sourceLineNo">241</span><a name="line.241"></a>
+<span class="sourceLineNo">242</span>  public int num_mod_samples() {<a name="line.242"></a>
+<span class="sourceLineNo">243</span>    return 2222;<a name="line.243"></a>
+<span class="sourceLineNo">244</span>  }<a name="line.244"></a>
+<span class="sourceLineNo">245</span><a name="line.245"></a>
+<span class="sourceLineNo">246</span>  @Override<a name="line.246"></a>
+<span class="sourceLineNo">247</span>  public int num_values() {<a name="line.247"></a>
+<span class="sourceLineNo">248</span>    return 2222;<a name="line.248"></a>
+<span class="sourceLineNo">249</span>  }<a name="line.249"></a>
+<span class="sourceLineNo">250</span><a name="line.250"></a>
+<span class="sourceLineNo">251</span>  @Override<a name="line.251"></a>
+<span class="sourceLineNo">252</span>  void instantiate_invariants() {<a name="line.252"></a>
+<span class="sourceLineNo">253</span>    throw new Error("Shouldn't get called");<a name="line.253"></a>
+<span class="sourceLineNo">254</span>  }<a name="line.254"></a>
+<span class="sourceLineNo">255</span><a name="line.255"></a>
+<span class="sourceLineNo">256</span>  @Override<a name="line.256"></a>
+<span class="sourceLineNo">257</span>  public List&lt;Invariant&gt; add(ValueTuple vt, int count) {<a name="line.257"></a>
+<span class="sourceLineNo">258</span>    throw new Error("Shouldn't get called");<a name="line.258"></a>
+<span class="sourceLineNo">259</span>  }<a name="line.259"></a>
+<span class="sourceLineNo">260</span>}<a name="line.260"></a>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</pre>
+</div>
+</body>
+</html>

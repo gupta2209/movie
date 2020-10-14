@@ -1,0 +1,933 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<html lang="en">
+<head><link rel="icon" href="../../daikon-favicon.png" type="image/png"/>
+<title>Source code</title>
+<link rel="stylesheet" type="text/css" href="../../stylesheet.css" title="Style">
+</head>
+<body>
+<div class="sourceContainer">
+<pre><span class="sourceLineNo">001</span>package daikon;<a name="line.1"></a>
+<span class="sourceLineNo">002</span><a name="line.2"></a>
+<span class="sourceLineNo">003</span>import daikon.inv.Invariant;<a name="line.3"></a>
+<span class="sourceLineNo">004</span>import java.util.Arrays;<a name="line.4"></a>
+<span class="sourceLineNo">005</span>import java.util.List;<a name="line.5"></a>
+<span class="sourceLineNo">006</span>import java.util.Set;<a name="line.6"></a>
+<span class="sourceLineNo">007</span>import java.util.logging.Level;<a name="line.7"></a>
+<span class="sourceLineNo">008</span>import java.util.logging.Logger;<a name="line.8"></a>
+<span class="sourceLineNo">009</span>import org.checkerframework.checker.initialization.qual.UnknownInitialization;<a name="line.9"></a>
+<span class="sourceLineNo">010</span>import org.checkerframework.checker.nullness.qual.NonNull;<a name="line.10"></a>
+<span class="sourceLineNo">011</span>import org.checkerframework.checker.nullness.qual.Nullable;<a name="line.11"></a>
+<span class="sourceLineNo">012</span>import org.plumelib.util.ArraysPlume;<a name="line.12"></a>
+<span class="sourceLineNo">013</span>import org.plumelib.util.UtilPlume;<a name="line.13"></a>
+<span class="sourceLineNo">014</span><a name="line.14"></a>
+<span class="sourceLineNo">015</span>/**<a name="line.15"></a>
+<span class="sourceLineNo">016</span> * Debug class used with the logger to create standardized output. It can be setup to track<a name="line.16"></a>
+<span class="sourceLineNo">017</span> * combinations of classes, program points, and variables. The most common class to track is an<a name="line.17"></a>
+<span class="sourceLineNo">018</span> * invariant, but any class can be used.<a name="line.18"></a>
+<span class="sourceLineNo">019</span> *<a name="line.19"></a>
+<span class="sourceLineNo">020</span> * &lt;p&gt;This allows detailed information about a particular class/ppt/variable combination to be<a name="line.20"></a>
+<span class="sourceLineNo">021</span> * printed without getting lost in a mass of other information (which is a particular problem in<a name="line.21"></a>
+<span class="sourceLineNo">022</span> * Daikon due to the volume of data considered).<a name="line.22"></a>
+<span class="sourceLineNo">023</span> *<a name="line.23"></a>
+<span class="sourceLineNo">024</span> * &lt;p&gt;Note that each of the three items (class, ppt, variable) must match in order for printing to<a name="line.24"></a>
+<span class="sourceLineNo">025</span> * occur.<a name="line.25"></a>
+<span class="sourceLineNo">026</span> */<a name="line.26"></a>
+<span class="sourceLineNo">027</span>public final class Debug {<a name="line.27"></a>
+<span class="sourceLineNo">028</span><a name="line.28"></a>
+<span class="sourceLineNo">029</span>  /** Debug Logger. */<a name="line.29"></a>
+<span class="sourceLineNo">030</span>  public static final Logger debugTrack = Logger.getLogger("daikon.Debug");<a name="line.30"></a>
+<span class="sourceLineNo">031</span><a name="line.31"></a>
+<span class="sourceLineNo">032</span>  /**<a name="line.32"></a>
+<span class="sourceLineNo">033</span>   * List of classes for logging. Each name listed is compared to the fully qualified class name. If<a name="line.33"></a>
+<span class="sourceLineNo">034</span>   * it matches (shows up anywhere in the class name) it will be included in debug prints. This is<a name="line.34"></a>
+<span class="sourceLineNo">035</span>   * not a regular expression match<a name="line.35"></a>
+<span class="sourceLineNo">036</span>   *<a name="line.36"></a>
+<span class="sourceLineNo">037</span>   * @see #log(Logger, Class, Ppt, String)<a name="line.37"></a>
+<span class="sourceLineNo">038</span>   */<a name="line.38"></a>
+<span class="sourceLineNo">039</span>  public static String[] debugTrackClass = {<a name="line.39"></a>
+<span class="sourceLineNo">040</span>    // "Bound",<a name="line.40"></a>
+<span class="sourceLineNo">041</span>    // "DynamicConstants",<a name="line.41"></a>
+<span class="sourceLineNo">042</span>    // "EltNonZero",<a name="line.42"></a>
+<span class="sourceLineNo">043</span>    // "EltNonZeroFloat",<a name="line.43"></a>
+<span class="sourceLineNo">044</span>    // "EltOneOf",<a name="line.44"></a>
+<span class="sourceLineNo">045</span>    // "Equality",<a name="line.45"></a>
+<span class="sourceLineNo">046</span>    // "FunctionBinary",<a name="line.46"></a>
+<span class="sourceLineNo">047</span>    // "IntEqual",<a name="line.47"></a>
+<span class="sourceLineNo">048</span>    // "IntGreaterEqual",<a name="line.48"></a>
+<span class="sourceLineNo">049</span>    // "IntGreaterThan",<a name="line.49"></a>
+<span class="sourceLineNo">050</span>    // "IntLessEqual",<a name="line.50"></a>
+<span class="sourceLineNo">051</span>    // "IntLessThan",<a name="line.51"></a>
+<span class="sourceLineNo">052</span>    // "IntNonEqual",<a name="line.52"></a>
+<span class="sourceLineNo">053</span>    // "LinearBinary",<a name="line.53"></a>
+<span class="sourceLineNo">054</span>    // "LowerBound",<a name="line.54"></a>
+<span class="sourceLineNo">055</span>    // "Member",<a name="line.55"></a>
+<span class="sourceLineNo">056</span>    // "NonZero",<a name="line.56"></a>
+<span class="sourceLineNo">057</span>    // "OneOfSequence",<a name="line.57"></a>
+<span class="sourceLineNo">058</span>    // "PptSlice",<a name="line.58"></a>
+<span class="sourceLineNo">059</span>    // "PptSlice2",<a name="line.59"></a>
+<span class="sourceLineNo">060</span>    // "PptSliceEquality",<a name="line.60"></a>
+<span class="sourceLineNo">061</span>    // "PptTopLevel",<a name="line.61"></a>
+<span class="sourceLineNo">062</span>    // "SeqIndexComparison",<a name="line.62"></a>
+<span class="sourceLineNo">063</span>    // "SeqIndexNonEqual",<a name="line.63"></a>
+<span class="sourceLineNo">064</span>    // "SeqIntEqual",<a name="line.64"></a>
+<span class="sourceLineNo">065</span>    // "SeqSeqIntEqual",<a name="line.65"></a>
+<span class="sourceLineNo">066</span>    // "NonZero",<a name="line.66"></a>
+<span class="sourceLineNo">067</span>    // "FunctionBinary",<a name="line.67"></a>
+<span class="sourceLineNo">068</span>    // "OneOfSequence",<a name="line.68"></a>
+<span class="sourceLineNo">069</span>    // "IntLessEqual",<a name="line.69"></a>
+<span class="sourceLineNo">070</span>    // "IntGreaterEqual",<a name="line.70"></a>
+<span class="sourceLineNo">071</span>    // "IntLessThan",<a name="line.71"></a>
+<span class="sourceLineNo">072</span>    // "IntGreaterThan",<a name="line.72"></a>
+<span class="sourceLineNo">073</span>    // "IntNonEqual",<a name="line.73"></a>
+<span class="sourceLineNo">074</span>    // "Member",<a name="line.74"></a>
+<span class="sourceLineNo">075</span>    // "FunctionBinary"<a name="line.75"></a>
+<span class="sourceLineNo">076</span>    // "EltNonZero",<a name="line.76"></a>
+<span class="sourceLineNo">077</span>    // "SeqSeqIntGreaterThan",<a name="line.77"></a>
+<span class="sourceLineNo">078</span>    // "SeqSeqIntLessThan",<a name="line.78"></a>
+<span class="sourceLineNo">079</span>    // "SubSet",<a name="line.79"></a>
+<span class="sourceLineNo">080</span>    // "SuperSet",<a name="line.80"></a>
+<span class="sourceLineNo">081</span>    // "EltOneOf",<a name="line.81"></a>
+<span class="sourceLineNo">082</span>    // "Bound",<a name="line.82"></a>
+<span class="sourceLineNo">083</span>    // "SeqSeqIntLessThan",<a name="line.83"></a>
+<span class="sourceLineNo">084</span>    // "SeqSeqIntGreaterThan",<a name="line.84"></a>
+<span class="sourceLineNo">085</span>    // "OneOf"<a name="line.85"></a>
+<span class="sourceLineNo">086</span>    // "StringEqual",<a name="line.86"></a>
+<span class="sourceLineNo">087</span>    // "StringLessThan",<a name="line.87"></a>
+<span class="sourceLineNo">088</span>    // "StringGreaterThan",<a name="line.88"></a>
+<span class="sourceLineNo">089</span>    // "Modlong_zxy",<a name="line.89"></a>
+<span class="sourceLineNo">090</span>    // "UpperBound",<a name="line.90"></a>
+<span class="sourceLineNo">091</span>  };<a name="line.91"></a>
+<span class="sourceLineNo">092</span><a name="line.92"></a>
+<span class="sourceLineNo">093</span>  /**<a name="line.93"></a>
+<span class="sourceLineNo">094</span>   * Restrict function binary prints to the specified method. Implementation is in the<a name="line.94"></a>
+<span class="sourceLineNo">095</span>   * FunctionBinary specific log functions. If null, there is no restriction (all function binary<a name="line.95"></a>
+<span class="sourceLineNo">096</span>   * methods are printed). See Functions.java for a list of function names.<a name="line.96"></a>
+<span class="sourceLineNo">097</span>   */<a name="line.97"></a>
+<span class="sourceLineNo">098</span>  public static @Nullable String function_binary_method = null<a name="line.98"></a>
+<span class="sourceLineNo">099</span>      // "java.lang.Math.max("<a name="line.99"></a>
+<span class="sourceLineNo">100</span>      // "java.lang.Math.min("<a name="line.100"></a>
+<span class="sourceLineNo">101</span>      // "org.plumelib.util.MathPlume.logicalXor("<a name="line.101"></a>
+<span class="sourceLineNo">102</span>      // "org.plumelib.util.MathPlume.gcd("<a name="line.102"></a>
+<span class="sourceLineNo">103</span>      ;<a name="line.103"></a>
+<span class="sourceLineNo">104</span><a name="line.104"></a>
+<span class="sourceLineNo">105</span>  /**<a name="line.105"></a>
+<span class="sourceLineNo">106</span>   * List of Ppts for logging. Each name listed is compared to the full program point name. If it<a name="line.106"></a>
+<span class="sourceLineNo">107</span>   * matches (shows up anywhere in the ppt name) it will be included in the debug prints. This is<a name="line.107"></a>
+<span class="sourceLineNo">108</span>   * not a regular expression match.<a name="line.108"></a>
+<span class="sourceLineNo">109</span>   *<a name="line.109"></a>
+<span class="sourceLineNo">110</span>   * @see #log(Logger, Class, Ppt, String)<a name="line.110"></a>
+<span class="sourceLineNo">111</span>   */<a name="line.111"></a>
+<span class="sourceLineNo">112</span>  public static String[] debugTrackPpt = {<a name="line.112"></a>
+<span class="sourceLineNo">113</span>    // "DataStructures.DisjSets.unionDisjoint(int, int):::EXIT",<a name="line.113"></a>
+<span class="sourceLineNo">114</span>    // "DataStructures.StackAr.StackAr(int):::EXIT",<a name="line.114"></a>
+<span class="sourceLineNo">115</span>    // "DataStructures.StackAr.makeEmpty():::EXIT",<a name="line.115"></a>
+<span class="sourceLineNo">116</span>    // "DataStructures.StackAr.makeEmpty()V:::ENTER",<a name="line.116"></a>
+<span class="sourceLineNo">117</span>    // "DataStructures.StackAr.top():::EXIT74",<a name="line.117"></a>
+<span class="sourceLineNo">118</span>    // "GLOBAL",<a name="line.118"></a>
+<span class="sourceLineNo">119</span>    // "std.main(int;char **;)int:::EXIT",<a name="line.119"></a>
+<span class="sourceLineNo">120</span>  };<a name="line.120"></a>
+<span class="sourceLineNo">121</span><a name="line.121"></a>
+<span class="sourceLineNo">122</span>  /**<a name="line.122"></a>
+<span class="sourceLineNo">123</span>   * List of variable names for logging. Each name listed is compared to each variable in turn. If<a name="line.123"></a>
+<span class="sourceLineNo">124</span>   * each matches exactly it will be included in track debug prints. This is not a regular<a name="line.124"></a>
+<span class="sourceLineNo">125</span>   * expression match. Note that the number of variables must match the slice exactly.<a name="line.125"></a>
+<span class="sourceLineNo">126</span>   *<a name="line.126"></a>
+<span class="sourceLineNo">127</span>   * @see #log(Logger, Class, Ppt, String)<a name="line.127"></a>
+<span class="sourceLineNo">128</span>   */<a name="line.128"></a>
+<span class="sourceLineNo">129</span>  public static String[][] debugTrackVars = {<a name="line.129"></a>
+<span class="sourceLineNo">130</span>    // {"::printstats"},<a name="line.130"></a>
+<span class="sourceLineNo">131</span>    // {"misc.Fib.STEPS", "orig(misc.Fib.a)"},<a name="line.131"></a>
+<span class="sourceLineNo">132</span>    // {"misc.Fib.a", "misc.Fib.STEPS"},<a name="line.132"></a>
+<span class="sourceLineNo">133</span>    // {"return"},<a name="line.133"></a>
+<span class="sourceLineNo">134</span>  };<a name="line.134"></a>
+<span class="sourceLineNo">135</span><a name="line.135"></a>
+<span class="sourceLineNo">136</span>  // Ordinarily, a client would have to supply a Class, Ppt, and<a name="line.136"></a>
+<span class="sourceLineNo">137</span>  // List&lt;Varinfo&gt; with each call to a log method.  But the client can<a name="line.137"></a>
+<span class="sourceLineNo">138</span>  // instead provide those values once (they are cached in these variables)<a name="line.138"></a>
+<span class="sourceLineNo">139</span>  // and omit them in subsequent calls.  The subsequent calls can use forms<a name="line.139"></a>
+<span class="sourceLineNo">140</span>  // of log() that take fewer arguments.<a name="line.140"></a>
+<span class="sourceLineNo">141</span><a name="line.141"></a>
+<span class="sourceLineNo">142</span>  /**<a name="line.142"></a>
+<span class="sourceLineNo">143</span>   * True if the cached values should be printed --- that is, they match what is currently being<a name="line.143"></a>
+<span class="sourceLineNo">144</span>   * debugged.<a name="line.144"></a>
+<span class="sourceLineNo">145</span>   */<a name="line.145"></a>
+<span class="sourceLineNo">146</span>  public boolean cache_match = true;<a name="line.146"></a>
+<span class="sourceLineNo">147</span><a name="line.147"></a>
+<span class="sourceLineNo">148</span>  // Note that throughout this file, inv_class is not necessarily a<a name="line.148"></a>
+<span class="sourceLineNo">149</span>  // subclass of Invariant -- for instance, it might be a subclass of<a name="line.149"></a>
+<span class="sourceLineNo">150</span>  // BinaryDerivationFactory.<a name="line.150"></a>
+<span class="sourceLineNo">151</span>  /** cached class: class to use by default when calling variants of log() with few arguments */<a name="line.151"></a>
+<span class="sourceLineNo">152</span>  public @Nullable Class&lt;?&gt; cache_class;<a name="line.152"></a>
+<span class="sourceLineNo">153</span><a name="line.153"></a>
+<span class="sourceLineNo">154</span>  /** cached ppt: ppt to use by default when calling variants of log() with few arguments */<a name="line.154"></a>
+<span class="sourceLineNo">155</span>  public @Nullable Ppt cache_ppt;<a name="line.155"></a>
+<span class="sourceLineNo">156</span><a name="line.156"></a>
+<span class="sourceLineNo">157</span>  /**<a name="line.157"></a>
+<span class="sourceLineNo">158</span>   * Cached variables: variables to use by default when calling variants of log() with few<a name="line.158"></a>
+<span class="sourceLineNo">159</span>   * arguments.<a name="line.159"></a>
+<span class="sourceLineNo">160</span>   */<a name="line.160"></a>
+<span class="sourceLineNo">161</span>  public VarInfo @Nullable [] cache_vis;<a name="line.161"></a>
+<span class="sourceLineNo">162</span><a name="line.162"></a>
+<span class="sourceLineNo">163</span>  /**<a name="line.163"></a>
+<span class="sourceLineNo">164</span>   * Ordinarily, a client would have to supply a Class, Ppt, and {@code List&lt;Varinfo&gt;} with each<a name="line.164"></a>
+<span class="sourceLineNo">165</span>   * call to a log method. This constructor sets as defaults c, ppt, and whatever variable (if any)<a name="line.165"></a>
+<span class="sourceLineNo">166</span>   * from vis that is on the debugTrackVar list. Essentially this creates a debug object that will<a name="line.166"></a>
+<span class="sourceLineNo">167</span>   * print if any of the variables in vis are being tracked (and c and ppt match).<a name="line.167"></a>
+<span class="sourceLineNo">168</span>   */<a name="line.168"></a>
+<span class="sourceLineNo">169</span>  public Debug(Class&lt;?&gt; c, Ppt ppt, VarInfo[] vis) {<a name="line.169"></a>
+<span class="sourceLineNo">170</span>    set(c, ppt, vis);<a name="line.170"></a>
+<span class="sourceLineNo">171</span>  }<a name="line.171"></a>
+<span class="sourceLineNo">172</span><a name="line.172"></a>
+<span class="sourceLineNo">173</span>  /**<a name="line.173"></a>
+<span class="sourceLineNo">174</span>   * Returns a Debug object if the specified class, ppt, and vis match what is being tracked.<a name="line.174"></a>
+<span class="sourceLineNo">175</span>   * Otherwise, return NULL. Preferred over calling the constructor directly, since it doesn't<a name="line.175"></a>
+<span class="sourceLineNo">176</span>   * create the object if it doesn't have to.<a name="line.176"></a>
+<span class="sourceLineNo">177</span>   */<a name="line.177"></a>
+<span class="sourceLineNo">178</span>  public static @Nullable Debug newDebug(Class&lt;?&gt; c, Ppt ppt, VarInfo[] vis) {<a name="line.178"></a>
+<span class="sourceLineNo">179</span>    if (logOn() &amp;&amp; class_match(c) &amp;&amp; ppt_match(ppt) &amp;&amp; var_match(vis)) {<a name="line.179"></a>
+<span class="sourceLineNo">180</span>      return new Debug(c, ppt, vis);<a name="line.180"></a>
+<span class="sourceLineNo">181</span>    } else {<a name="line.181"></a>
+<span class="sourceLineNo">182</span>      return null;<a name="line.182"></a>
+<span class="sourceLineNo">183</span>    }<a name="line.183"></a>
+<span class="sourceLineNo">184</span>  }<a name="line.184"></a>
+<span class="sourceLineNo">185</span><a name="line.185"></a>
+<span class="sourceLineNo">186</span>  /**<a name="line.186"></a>
+<span class="sourceLineNo">187</span>   * Ordinarily, a client would have to supply a Class, Ppt, and {@code List&lt;Varinfo&gt;} with each<a name="line.187"></a>
+<span class="sourceLineNo">188</span>   * call to a log method. This constructor sets as defaults c, ppt, and whatever variable (if any)<a name="line.188"></a>
+<span class="sourceLineNo">189</span>   * from vis that is on the debugTrackVar list. Essentially this creates a debug object that will<a name="line.189"></a>
+<span class="sourceLineNo">190</span>   * print if any of the variables in vis are being tracked (and c and ppt match).<a name="line.190"></a>
+<span class="sourceLineNo">191</span>   */<a name="line.191"></a>
+<span class="sourceLineNo">192</span>  public Debug(Class&lt;?&gt; c, Ppt ppt, List&lt;VarInfo&gt; vis) {<a name="line.192"></a>
+<span class="sourceLineNo">193</span><a name="line.193"></a>
+<span class="sourceLineNo">194</span>    VarInfo v = visTracked(vis);<a name="line.194"></a>
+<span class="sourceLineNo">195</span>    if (v != null) {<a name="line.195"></a>
+<span class="sourceLineNo">196</span>      set(c, ppt, new VarInfo[] {v});<a name="line.196"></a>
+<span class="sourceLineNo">197</span>    } else if (vis.size() &gt; 0) {<a name="line.197"></a>
+<span class="sourceLineNo">198</span>      set(c, ppt, new VarInfo[] {vis.get(0)});<a name="line.198"></a>
+<span class="sourceLineNo">199</span>    } else {<a name="line.199"></a>
+<span class="sourceLineNo">200</span>      set(c, ppt, null);<a name="line.200"></a>
+<span class="sourceLineNo">201</span>    }<a name="line.201"></a>
+<span class="sourceLineNo">202</span>  }<a name="line.202"></a>
+<span class="sourceLineNo">203</span><a name="line.203"></a>
+<span class="sourceLineNo">204</span>  /**<a name="line.204"></a>
+<span class="sourceLineNo">205</span>   * Looks for each of the variables in vis in the DebugTrackVar list. If any match, returns that<a name="line.205"></a>
+<span class="sourceLineNo">206</span>   * variable. Returns null if there are no matches.<a name="line.206"></a>
+<span class="sourceLineNo">207</span>   */<a name="line.207"></a>
+<span class="sourceLineNo">208</span>  public @Nullable VarInfo visTracked(@UnknownInitialization Debug this, List&lt;VarInfo&gt; vis) {<a name="line.208"></a>
+<span class="sourceLineNo">209</span><a name="line.209"></a>
+<span class="sourceLineNo">210</span>    for (VarInfo v : vis) {<a name="line.210"></a>
+<span class="sourceLineNo">211</span>      Set&lt;VarInfo&gt; evars = null;<a name="line.211"></a>
+<span class="sourceLineNo">212</span>      if (v.equalitySet != null) {<a name="line.212"></a>
+<span class="sourceLineNo">213</span>        evars = v.equalitySet.getVars();<a name="line.213"></a>
+<span class="sourceLineNo">214</span>      }<a name="line.214"></a>
+<span class="sourceLineNo">215</span>      if (evars != null) {<a name="line.215"></a>
+<span class="sourceLineNo">216</span>        for (VarInfo ev : evars) {<a name="line.216"></a>
+<span class="sourceLineNo">217</span>          for (int k = 0; k &lt; debugTrackVars.length; k++) {<a name="line.217"></a>
+<span class="sourceLineNo">218</span>            if (ev.name().equals(debugTrackVars[k][0])) {<a name="line.218"></a>
+<span class="sourceLineNo">219</span>              return v;<a name="line.219"></a>
+<span class="sourceLineNo">220</span>            }<a name="line.220"></a>
+<span class="sourceLineNo">221</span>          }<a name="line.221"></a>
+<span class="sourceLineNo">222</span>        }<a name="line.222"></a>
+<span class="sourceLineNo">223</span>      }<a name="line.223"></a>
+<span class="sourceLineNo">224</span>    }<a name="line.224"></a>
+<span class="sourceLineNo">225</span><a name="line.225"></a>
+<span class="sourceLineNo">226</span>    return null;<a name="line.226"></a>
+<span class="sourceLineNo">227</span>  }<a name="line.227"></a>
+<span class="sourceLineNo">228</span><a name="line.228"></a>
+<span class="sourceLineNo">229</span>  private static @Nullable String[] ourvars = new String[3];<a name="line.229"></a>
+<span class="sourceLineNo">230</span><a name="line.230"></a>
+<span class="sourceLineNo">231</span>  private static final VarInfo[] vis1 = new VarInfo[1];<a name="line.231"></a>
+<span class="sourceLineNo">232</span>  private static final VarInfo[] vis2 = new VarInfo[2];<a name="line.232"></a>
+<span class="sourceLineNo">233</span>  private static final VarInfo[] vis3 = new VarInfo[3];<a name="line.233"></a>
+<span class="sourceLineNo">234</span><a name="line.234"></a>
+<span class="sourceLineNo">235</span>  public static VarInfo[] vis(VarInfo v1) {<a name="line.235"></a>
+<span class="sourceLineNo">236</span>    vis1[0] = v1;<a name="line.236"></a>
+<span class="sourceLineNo">237</span>    return vis1;<a name="line.237"></a>
+<span class="sourceLineNo">238</span>  }<a name="line.238"></a>
+<span class="sourceLineNo">239</span><a name="line.239"></a>
+<span class="sourceLineNo">240</span>  public static VarInfo[] vis(VarInfo v1, VarInfo v2) {<a name="line.240"></a>
+<span class="sourceLineNo">241</span>    vis2[0] = v1;<a name="line.241"></a>
+<span class="sourceLineNo">242</span>    vis2[1] = v2;<a name="line.242"></a>
+<span class="sourceLineNo">243</span>    return vis2;<a name="line.243"></a>
+<span class="sourceLineNo">244</span>  }<a name="line.244"></a>
+<span class="sourceLineNo">245</span><a name="line.245"></a>
+<span class="sourceLineNo">246</span>  public static VarInfo[] vis(VarInfo v1, VarInfo v2, VarInfo v3) {<a name="line.246"></a>
+<span class="sourceLineNo">247</span>    vis3[0] = v1;<a name="line.247"></a>
+<span class="sourceLineNo">248</span>    vis3[1] = v2;<a name="line.248"></a>
+<span class="sourceLineNo">249</span>    vis3[2] = v3;<a name="line.249"></a>
+<span class="sourceLineNo">250</span>    return vis3;<a name="line.250"></a>
+<span class="sourceLineNo">251</span>  }<a name="line.251"></a>
+<span class="sourceLineNo">252</span><a name="line.252"></a>
+<span class="sourceLineNo">253</span>  /**<a name="line.253"></a>
+<span class="sourceLineNo">254</span>   * Sets the cache for class, ppt, and vis so that future calls to log don't have to set them -- in<a name="line.254"></a>
+<span class="sourceLineNo">255</span>   * other words, future calls can use the versions of log with fewer arguments.<a name="line.255"></a>
+<span class="sourceLineNo">256</span>   */<a name="line.256"></a>
+<span class="sourceLineNo">257</span>  void set(<a name="line.257"></a>
+<span class="sourceLineNo">258</span>      @UnknownInitialization Debug this,<a name="line.258"></a>
+<span class="sourceLineNo">259</span>      @Nullable Class&lt;?&gt; c,<a name="line.259"></a>
+<span class="sourceLineNo">260</span>      @Nullable Ppt ppt,<a name="line.260"></a>
+<span class="sourceLineNo">261</span>      VarInfo @Nullable [] vis) {<a name="line.261"></a>
+<span class="sourceLineNo">262</span>    cache_class = c;<a name="line.262"></a>
+<span class="sourceLineNo">263</span>    cache_ppt = ppt;<a name="line.263"></a>
+<span class="sourceLineNo">264</span>    cache_vis = vis;<a name="line.264"></a>
+<span class="sourceLineNo">265</span>    if (c == null) {<a name="line.265"></a>
+<span class="sourceLineNo">266</span>      System.out.println("Class = null");<a name="line.266"></a>
+<span class="sourceLineNo">267</span>    }<a name="line.267"></a>
+<span class="sourceLineNo">268</span>    if (ppt == null) {<a name="line.268"></a>
+<span class="sourceLineNo">269</span>      System.out.println("ppt = null");<a name="line.269"></a>
+<span class="sourceLineNo">270</span>    }<a name="line.270"></a>
+<span class="sourceLineNo">271</span>    if (vis == null) {<a name="line.271"></a>
+<span class="sourceLineNo">272</span>      System.out.println("vis = null");<a name="line.272"></a>
+<span class="sourceLineNo">273</span>    } else {<a name="line.273"></a>
+<span class="sourceLineNo">274</span>      for (int i = 0; i &lt; vis.length; i++) {<a name="line.274"></a>
+<span class="sourceLineNo">275</span>        if (vis[i] == null) System.out.println("vis[" + i + "] == null");<a name="line.275"></a>
+<span class="sourceLineNo">276</span>      }<a name="line.276"></a>
+<span class="sourceLineNo">277</span>    }<a name="line.277"></a>
+<span class="sourceLineNo">278</span>    cache_match = class_match(c) &amp;&amp; ppt_match(ppt) &amp;&amp; var_match(vis);<a name="line.278"></a>
+<span class="sourceLineNo">279</span>  }<a name="line.279"></a>
+<span class="sourceLineNo">280</span><a name="line.280"></a>
+<span class="sourceLineNo">281</span>  /**<a name="line.281"></a>
+<span class="sourceLineNo">282</span>   * When true, perform detailed internal checking. These are essentially additional, possibly<a name="line.282"></a>
+<span class="sourceLineNo">283</span>   * costly assert statements.<a name="line.283"></a>
+<span class="sourceLineNo">284</span>   */<a name="line.284"></a>
+<span class="sourceLineNo">285</span>  public static boolean dkconfig_internal_check = false;<a name="line.285"></a>
+<span class="sourceLineNo">286</span><a name="line.286"></a>
+<span class="sourceLineNo">287</span>  /** If true, show stack traces for errors such as file format errors. */<a name="line.287"></a>
+<span class="sourceLineNo">288</span>  public static boolean dkconfig_show_stack_trace = false;<a name="line.288"></a>
+<span class="sourceLineNo">289</span><a name="line.289"></a>
+<span class="sourceLineNo">290</span>  /**<a name="line.290"></a>
+<span class="sourceLineNo">291</span>   * Determines whether or not traceback information is printed for each call to log.<a name="line.291"></a>
+<span class="sourceLineNo">292</span>   *<a name="line.292"></a>
+<span class="sourceLineNo">293</span>   * @see #log(Logger, Class, Ppt, String)<a name="line.293"></a>
+<span class="sourceLineNo">294</span>   */<a name="line.294"></a>
+<span class="sourceLineNo">295</span>  public static boolean dkconfig_showTraceback = false;<a name="line.295"></a>
+<span class="sourceLineNo">296</span><a name="line.296"></a>
+<span class="sourceLineNo">297</span>  /**<a name="line.297"></a>
+<span class="sourceLineNo">298</span>   * Determines whether or not detailed info (such as from {@code add_modified}) is printed.<a name="line.298"></a>
+<span class="sourceLineNo">299</span>   *<a name="line.299"></a>
+<span class="sourceLineNo">300</span>   * @see #log(Logger, Class, Ppt, String)<a name="line.300"></a>
+<span class="sourceLineNo">301</span>   * @see #logDetail()<a name="line.301"></a>
+<span class="sourceLineNo">302</span>   */<a name="line.302"></a>
+<span class="sourceLineNo">303</span>  public static boolean dkconfig_logDetail = false;<a name="line.303"></a>
+<span class="sourceLineNo">304</span><a name="line.304"></a>
+<span class="sourceLineNo">305</span>  /**<a name="line.305"></a>
+<span class="sourceLineNo">306</span>   * Returns whether or not detailed logging is on. Note that this check is not performed inside the<a name="line.306"></a>
+<span class="sourceLineNo">307</span>   * logging calls themselves, it must be performed by the caller.<a name="line.307"></a>
+<span class="sourceLineNo">308</span>   *<a name="line.308"></a>
+<span class="sourceLineNo">309</span>   * @see #log(Logger, Class, Ppt, String)<a name="line.309"></a>
+<span class="sourceLineNo">310</span>   * @see #logOn()<a name="line.310"></a>
+<span class="sourceLineNo">311</span>   */<a name="line.311"></a>
+<span class="sourceLineNo">312</span>  public static final boolean logDetail() {<a name="line.312"></a>
+<span class="sourceLineNo">313</span>    return (dkconfig_logDetail &amp;&amp; debugTrack.isLoggable(Level.FINE));<a name="line.313"></a>
+<span class="sourceLineNo">314</span>  }<a name="line.314"></a>
+<span class="sourceLineNo">315</span><a name="line.315"></a>
+<span class="sourceLineNo">316</span>  /**<a name="line.316"></a>
+<span class="sourceLineNo">317</span>   * Returns whether or not logging is on.<a name="line.317"></a>
+<span class="sourceLineNo">318</span>   *<a name="line.318"></a>
+<span class="sourceLineNo">319</span>   * @see #log(Logger, Class, Ppt, String)<a name="line.319"></a>
+<span class="sourceLineNo">320</span>   */<a name="line.320"></a>
+<span class="sourceLineNo">321</span>  public static final boolean logOn() {<a name="line.321"></a>
+<span class="sourceLineNo">322</span>    return debugTrack.isLoggable(Level.FINE);<a name="line.322"></a>
+<span class="sourceLineNo">323</span>  }<a name="line.323"></a>
+<span class="sourceLineNo">324</span><a name="line.324"></a>
+<span class="sourceLineNo">325</span>  /**<a name="line.325"></a>
+<span class="sourceLineNo">326</span>   * Logs the cached class, cached ppt, cached variables and the specified msg via the logger as<a name="line.326"></a>
+<span class="sourceLineNo">327</span>   * described in {@link #log(Logger, Class, Ppt, VarInfo[], String)}.<a name="line.327"></a>
+<span class="sourceLineNo">328</span>   */<a name="line.328"></a>
+<span class="sourceLineNo">329</span>  public void log(Logger debug, String msg) {<a name="line.329"></a>
+<span class="sourceLineNo">330</span>    if (cache_match) log(debug, cache_class, cache_ppt, cache_vis, msg);<a name="line.330"></a>
+<span class="sourceLineNo">331</span>  }<a name="line.331"></a>
+<span class="sourceLineNo">332</span><a name="line.332"></a>
+<span class="sourceLineNo">333</span>  /**<a name="line.333"></a>
+<span class="sourceLineNo">334</span>   * Logs a description of the class, ppt, ppt variables and the specified msg via the logger as<a name="line.334"></a>
+<span class="sourceLineNo">335</span>   * described in {@link #log(Logger, Class, Ppt, VarInfo[], String)}.<a name="line.335"></a>
+<span class="sourceLineNo">336</span>   */<a name="line.336"></a>
+<span class="sourceLineNo">337</span>  public static void log(Logger debug, Class&lt;?&gt; inv_class, @Nullable Ppt ppt, String msg) {<a name="line.337"></a>
+<span class="sourceLineNo">338</span>    if (ppt == null) {<a name="line.338"></a>
+<span class="sourceLineNo">339</span>      log(debug, inv_class, ppt, null, msg);<a name="line.339"></a>
+<span class="sourceLineNo">340</span>    } else {<a name="line.340"></a>
+<span class="sourceLineNo">341</span>      log(debug, inv_class, ppt, ppt.var_infos, msg);<a name="line.341"></a>
+<span class="sourceLineNo">342</span>    }<a name="line.342"></a>
+<span class="sourceLineNo">343</span>  }<a name="line.343"></a>
+<span class="sourceLineNo">344</span><a name="line.344"></a>
+<span class="sourceLineNo">345</span>  /**<a name="line.345"></a>
+<span class="sourceLineNo">346</span>   * Logs a description of the class, ppt, variables and the specified msg via the logger. The<a name="line.346"></a>
+<span class="sourceLineNo">347</span>   * class, ppt, and variables are checked against those described in {@link #debugTrackClass},<a name="line.347"></a>
+<span class="sourceLineNo">348</span>   * {@link #debugTrackPpt}, and {@link #debugTrackVars}. Only those that match are printed.<a name="line.348"></a>
+<span class="sourceLineNo">349</span>   * Variables will match if they are in the same equality set. The information is written as:<a name="line.349"></a>
+<span class="sourceLineNo">350</span>   *<a name="line.350"></a>
+<span class="sourceLineNo">351</span>   * &lt;p&gt;{@code class: ppt : var1 : var2 : var3 : msg }<a name="line.351"></a>
+<span class="sourceLineNo">352</span>   *<a name="line.352"></a>
+<span class="sourceLineNo">353</span>   * &lt;p&gt;Note that if {@link #debugTrack} is not enabled then nothing is printed. It is somewhat<a name="line.353"></a>
+<span class="sourceLineNo">354</span>   * faster to check {@link #logOn()} directly rather than relying on the check here.<a name="line.354"></a>
+<span class="sourceLineNo">355</span>   *<a name="line.355"></a>
+<span class="sourceLineNo">356</span>   * &lt;p&gt;Other versions of this method (noted below) work without the Logger parameter and take<a name="line.356"></a>
+<span class="sourceLineNo">357</span>   * class, ppt, and vis from the cached values, which were set by the constructor or by the set()<a name="line.357"></a>
+<span class="sourceLineNo">358</span>   * method.<a name="line.358"></a>
+<span class="sourceLineNo">359</span>   *<a name="line.359"></a>
+<span class="sourceLineNo">360</span>   * @param debug a second Logger to query if debug tracking is turned off or does not match. If<a name="line.360"></a>
+<span class="sourceLineNo">361</span>   *     this logger is enabled, the same information will be written to it. Note that the<a name="line.361"></a>
+<span class="sourceLineNo">362</span>   *     information is never written to both loggers.<a name="line.362"></a>
+<span class="sourceLineNo">363</span>   * @param inv_class the class. Can be obtained in a static context by ClassName.class<a name="line.363"></a>
+<span class="sourceLineNo">364</span>   * @param ppt program point<a name="line.364"></a>
+<span class="sourceLineNo">365</span>   * @param vis variables at the program point. These are sometimes different from the ones in the<a name="line.365"></a>
+<span class="sourceLineNo">366</span>   *     ppt itself.<a name="line.366"></a>
+<span class="sourceLineNo">367</span>   * @param msg string message to log<a name="line.367"></a>
+<span class="sourceLineNo">368</span>   * @see #logOn()<a name="line.368"></a>
+<span class="sourceLineNo">369</span>   * @see #logDetail()<a name="line.369"></a>
+<span class="sourceLineNo">370</span>   * @see #log(Class, Ppt, VarInfo[], String)<a name="line.370"></a>
+<span class="sourceLineNo">371</span>   * @see #log(Class, Ppt, String)<a name="line.371"></a>
+<span class="sourceLineNo">372</span>   * @see #log(Logger, String)<a name="line.372"></a>
+<span class="sourceLineNo">373</span>   * @see #log(String)<a name="line.373"></a>
+<span class="sourceLineNo">374</span>   */<a name="line.374"></a>
+<span class="sourceLineNo">375</span>  public static void log(<a name="line.375"></a>
+<span class="sourceLineNo">376</span>      Logger debug,<a name="line.376"></a>
+<span class="sourceLineNo">377</span>      @Nullable Class&lt;?&gt; inv_class,<a name="line.377"></a>
+<span class="sourceLineNo">378</span>      @Nullable Ppt ppt,<a name="line.378"></a>
+<span class="sourceLineNo">379</span>      VarInfo @Nullable [] vis,<a name="line.379"></a>
+<span class="sourceLineNo">380</span>      String msg) {<a name="line.380"></a>
+<span class="sourceLineNo">381</span><a name="line.381"></a>
+<span class="sourceLineNo">382</span>    // Try to log via the logger first<a name="line.382"></a>
+<span class="sourceLineNo">383</span>    if (log(inv_class, ppt, vis, msg)) {<a name="line.383"></a>
+<span class="sourceLineNo">384</span>      return;<a name="line.384"></a>
+<span class="sourceLineNo">385</span>    }<a name="line.385"></a>
+<span class="sourceLineNo">386</span><a name="line.386"></a>
+<span class="sourceLineNo">387</span>    // If debug isn't turned on, there is nothing to do<a name="line.387"></a>
+<span class="sourceLineNo">388</span>    if (!debug.isLoggable(Level.FINE)) {<a name="line.388"></a>
+<span class="sourceLineNo">389</span>      return;<a name="line.389"></a>
+<span class="sourceLineNo">390</span>    }<a name="line.390"></a>
+<span class="sourceLineNo">391</span><a name="line.391"></a>
+<span class="sourceLineNo">392</span>    // Get the non-qualified class name<a name="line.392"></a>
+<span class="sourceLineNo">393</span>    String class_str;<a name="line.393"></a>
+<span class="sourceLineNo">394</span>    if (inv_class == null) {<a name="line.394"></a>
+<span class="sourceLineNo">395</span>      // when is inv_class null?<a name="line.395"></a>
+<span class="sourceLineNo">396</span>      class_str = "null";<a name="line.396"></a>
+<span class="sourceLineNo">397</span>    } else {<a name="line.397"></a>
+<span class="sourceLineNo">398</span>      @SuppressWarnings("nullness") // getPackage(): invariant class always has a package<a name="line.398"></a>
+<span class="sourceLineNo">399</span>      @NonNull String packageName = inv_class.getPackage().getName() + ".";<a name="line.399"></a>
+<span class="sourceLineNo">400</span>      class_str = UtilPlume.replaceString(inv_class.getName(), packageName, "");<a name="line.400"></a>
+<span class="sourceLineNo">401</span>    }<a name="line.401"></a>
+<span class="sourceLineNo">402</span><a name="line.402"></a>
+<span class="sourceLineNo">403</span>    String vars = "";<a name="line.403"></a>
+<span class="sourceLineNo">404</span>    if (vis == null) {<a name="line.404"></a>
+<span class="sourceLineNo">405</span>      System.out.println("no var infos");<a name="line.405"></a>
+<span class="sourceLineNo">406</span>    } else {<a name="line.406"></a>
+<span class="sourceLineNo">407</span><a name="line.407"></a>
+<span class="sourceLineNo">408</span>      // Get a string with all of the variable names.  Each is separated by ': '<a name="line.408"></a>
+<span class="sourceLineNo">409</span>      // 3 variable slots are always setup for consistency<a name="line.409"></a>
+<span class="sourceLineNo">410</span>      for (VarInfo v : vis) {<a name="line.410"></a>
+<span class="sourceLineNo">411</span>        vars += v.name() + ": ";<a name="line.411"></a>
+<span class="sourceLineNo">412</span>      }<a name="line.412"></a>
+<span class="sourceLineNo">413</span>      for (int i = vis.length; i &lt; 3; i++) {<a name="line.413"></a>
+<span class="sourceLineNo">414</span>        vars += ": ";<a name="line.414"></a>
+<span class="sourceLineNo">415</span>      }<a name="line.415"></a>
+<span class="sourceLineNo">416</span>    }<a name="line.416"></a>
+<span class="sourceLineNo">417</span><a name="line.417"></a>
+<span class="sourceLineNo">418</span>    // Figure out the sample count if possible<a name="line.418"></a>
+<span class="sourceLineNo">419</span>    String samp_str = "";<a name="line.419"></a>
+<span class="sourceLineNo">420</span>    if (ppt instanceof PptSlice) {<a name="line.420"></a>
+<span class="sourceLineNo">421</span>      PptSlice pslice = (PptSlice) ppt;<a name="line.421"></a>
+<span class="sourceLineNo">422</span>      samp_str = " s" + pslice.num_samples();<a name="line.422"></a>
+<span class="sourceLineNo">423</span>    }<a name="line.423"></a>
+<span class="sourceLineNo">424</span><a name="line.424"></a>
+<span class="sourceLineNo">425</span>    String line = " line=" + FileIO.get_linenum();<a name="line.425"></a>
+<span class="sourceLineNo">426</span><a name="line.426"></a>
+<span class="sourceLineNo">427</span>    String name = "ppt is null";<a name="line.427"></a>
+<span class="sourceLineNo">428</span>    if (ppt != null) {<a name="line.428"></a>
+<span class="sourceLineNo">429</span>      name = ppt.name();<a name="line.429"></a>
+<span class="sourceLineNo">430</span>    }<a name="line.430"></a>
+<span class="sourceLineNo">431</span><a name="line.431"></a>
+<span class="sourceLineNo">432</span>    debug.fine(class_str + ": " + name + samp_str + line + ": " + vars + msg);<a name="line.432"></a>
+<span class="sourceLineNo">433</span>    if (dkconfig_showTraceback) {<a name="line.433"></a>
+<span class="sourceLineNo">434</span>      Throwable stack = new Throwable("debug traceback");<a name="line.434"></a>
+<span class="sourceLineNo">435</span>      stack.fillInStackTrace();<a name="line.435"></a>
+<span class="sourceLineNo">436</span>      stack.printStackTrace();<a name="line.436"></a>
+<span class="sourceLineNo">437</span>    }<a name="line.437"></a>
+<span class="sourceLineNo">438</span>  }<a name="line.438"></a>
+<span class="sourceLineNo">439</span><a name="line.439"></a>
+<span class="sourceLineNo">440</span>  /**<a name="line.440"></a>
+<span class="sourceLineNo">441</span>   * Logs a description of the cached class, ppt, and variables and the specified msg via the logger<a name="line.441"></a>
+<span class="sourceLineNo">442</span>   * as described in {@link #log(Logger, Class, Ppt, VarInfo[], String)}<a name="line.442"></a>
+<span class="sourceLineNo">443</span>   *<a name="line.443"></a>
+<span class="sourceLineNo">444</span>   * @return whether or not it logged anything<a name="line.444"></a>
+<span class="sourceLineNo">445</span>   */<a name="line.445"></a>
+<span class="sourceLineNo">446</span>  public boolean log(String msg) {<a name="line.446"></a>
+<span class="sourceLineNo">447</span>    if (!logOn()) {<a name="line.447"></a>
+<span class="sourceLineNo">448</span>      return false;<a name="line.448"></a>
+<span class="sourceLineNo">449</span>    }<a name="line.449"></a>
+<span class="sourceLineNo">450</span>    return (log(cache_class, cache_ppt, cache_vis, msg));<a name="line.450"></a>
+<span class="sourceLineNo">451</span>  }<a name="line.451"></a>
+<span class="sourceLineNo">452</span><a name="line.452"></a>
+<span class="sourceLineNo">453</span>  /**<a name="line.453"></a>
+<span class="sourceLineNo">454</span>   * Logs a description of the class, ppt, ppt variables and the specified msg via the logger as<a name="line.454"></a>
+<span class="sourceLineNo">455</span>   * described in {@link #log(Logger, Class, Ppt, VarInfo[], String)}.<a name="line.455"></a>
+<span class="sourceLineNo">456</span>   *<a name="line.456"></a>
+<span class="sourceLineNo">457</span>   * @return whether or not it logged anything<a name="line.457"></a>
+<span class="sourceLineNo">458</span>   */<a name="line.458"></a>
+<span class="sourceLineNo">459</span>  // 3-argument form<a name="line.459"></a>
+<span class="sourceLineNo">460</span>  public static boolean log(<a name="line.460"></a>
+<span class="sourceLineNo">461</span>      Class&lt;?&gt; inv_class, @UnknownInitialization(PptTopLevel.class) Ppt ppt, String msg) {<a name="line.461"></a>
+<span class="sourceLineNo">462</span><a name="line.462"></a>
+<span class="sourceLineNo">463</span>    return (log(inv_class, ppt, ppt.var_infos, msg));<a name="line.463"></a>
+<span class="sourceLineNo">464</span>  }<a name="line.464"></a>
+<span class="sourceLineNo">465</span><a name="line.465"></a>
+<span class="sourceLineNo">466</span>  /**<a name="line.466"></a>
+<span class="sourceLineNo">467</span>   * Logs a description of the class, ppt, variables and the specified msg via the logger as<a name="line.467"></a>
+<span class="sourceLineNo">468</span>   * described in {@link #log(Logger, Class, Ppt, String)}. Accepts vis because sometimes the<a name="line.468"></a>
+<span class="sourceLineNo">469</span>   * variables are different from those in the ppt.<a name="line.469"></a>
+<span class="sourceLineNo">470</span>   *<a name="line.470"></a>
+<span class="sourceLineNo">471</span>   * @return whether or not it logged anything<a name="line.471"></a>
+<span class="sourceLineNo">472</span>   */<a name="line.472"></a>
+<span class="sourceLineNo">473</span>  // 4-argument form<a name="line.473"></a>
+<span class="sourceLineNo">474</span>  public static boolean log(<a name="line.474"></a>
+<span class="sourceLineNo">475</span>      @Nullable Class&lt;?&gt; inv_class,<a name="line.475"></a>
+<span class="sourceLineNo">476</span>      @Nullable @UnknownInitialization(PptTopLevel.class) Ppt ppt,<a name="line.476"></a>
+<span class="sourceLineNo">477</span>      VarInfo @Nullable [] vis,<a name="line.477"></a>
+<span class="sourceLineNo">478</span>      String msg) {<a name="line.478"></a>
+<span class="sourceLineNo">479</span><a name="line.479"></a>
+<span class="sourceLineNo">480</span>    if (!debugTrack.isLoggable(Level.FINE)) {<a name="line.480"></a>
+<span class="sourceLineNo">481</span>      return false;<a name="line.481"></a>
+<span class="sourceLineNo">482</span>    }<a name="line.482"></a>
+<span class="sourceLineNo">483</span><a name="line.483"></a>
+<span class="sourceLineNo">484</span>    // Make sure the class matches<a name="line.484"></a>
+<span class="sourceLineNo">485</span>    if (!class_match(inv_class)) {<a name="line.485"></a>
+<span class="sourceLineNo">486</span>      return false;<a name="line.486"></a>
+<span class="sourceLineNo">487</span>    }<a name="line.487"></a>
+<span class="sourceLineNo">488</span><a name="line.488"></a>
+<span class="sourceLineNo">489</span>    // Make sure the Ppt matches<a name="line.489"></a>
+<span class="sourceLineNo">490</span>    if (!ppt_match(ppt)) {<a name="line.490"></a>
+<span class="sourceLineNo">491</span>      return false;<a name="line.491"></a>
+<span class="sourceLineNo">492</span>    }<a name="line.492"></a>
+<span class="sourceLineNo">493</span><a name="line.493"></a>
+<span class="sourceLineNo">494</span>    // Make sure the variables match<a name="line.494"></a>
+<span class="sourceLineNo">495</span>    if (!var_match(vis)) {<a name="line.495"></a>
+<span class="sourceLineNo">496</span>      return false;<a name="line.496"></a>
+<span class="sourceLineNo">497</span>    }<a name="line.497"></a>
+<span class="sourceLineNo">498</span><a name="line.498"></a>
+<span class="sourceLineNo">499</span>    // Get the non-qualified class name<a name="line.499"></a>
+<span class="sourceLineNo">500</span>    String class_str = "null";<a name="line.500"></a>
+<span class="sourceLineNo">501</span>    if (inv_class != null) {<a name="line.501"></a>
+<span class="sourceLineNo">502</span>      @SuppressWarnings("nullness") // getPackage(): invariant class always has a package<a name="line.502"></a>
+<span class="sourceLineNo">503</span>      @NonNull String packageName = inv_class.getPackage().getName() + ".";<a name="line.503"></a>
+<span class="sourceLineNo">504</span>      class_str = UtilPlume.replaceString(inv_class.getName(), packageName, "");<a name="line.504"></a>
+<span class="sourceLineNo">505</span>    }<a name="line.505"></a>
+<span class="sourceLineNo">506</span><a name="line.506"></a>
+<span class="sourceLineNo">507</span>    // Get a string with all of the variable names.  Each is separated by ': '.<a name="line.507"></a>
+<span class="sourceLineNo">508</span>    // 3 variable slots are always setup for consistency.<a name="line.508"></a>
+<span class="sourceLineNo">509</span>    String vars = "";<a name="line.509"></a>
+<span class="sourceLineNo">510</span>    if (vis != null) {<a name="line.510"></a>
+<span class="sourceLineNo">511</span>      int numvars = vis.length;<a name="line.511"></a>
+<span class="sourceLineNo">512</span>      for (int i = 0; i &lt; numvars; i++) {<a name="line.512"></a>
+<span class="sourceLineNo">513</span>        VarInfo v = vis[i];<a name="line.513"></a>
+<span class="sourceLineNo">514</span>        vars += v.name();<a name="line.514"></a>
+<span class="sourceLineNo">515</span>        if (ourvars[i] != null) {<a name="line.515"></a>
+<span class="sourceLineNo">516</span>          vars += " {" + ourvars[i] + "}";<a name="line.516"></a>
+<span class="sourceLineNo">517</span>        }<a name="line.517"></a>
+<span class="sourceLineNo">518</span>        vars += ": ";<a name="line.518"></a>
+<span class="sourceLineNo">519</span>      }<a name="line.519"></a>
+<span class="sourceLineNo">520</span>      for (int i = numvars; i &lt; 3; i++) {<a name="line.520"></a>
+<span class="sourceLineNo">521</span>        vars += ": ";<a name="line.521"></a>
+<span class="sourceLineNo">522</span>      }<a name="line.522"></a>
+<span class="sourceLineNo">523</span>    }<a name="line.523"></a>
+<span class="sourceLineNo">524</span><a name="line.524"></a>
+<span class="sourceLineNo">525</span>    // Figure out the sample count if possible<a name="line.525"></a>
+<span class="sourceLineNo">526</span>    String samp_str = "";<a name="line.526"></a>
+<span class="sourceLineNo">527</span>    if (ppt instanceof PptSlice) {<a name="line.527"></a>
+<span class="sourceLineNo">528</span>      PptSlice pslice = (PptSlice) ppt;<a name="line.528"></a>
+<span class="sourceLineNo">529</span>      samp_str = " s" + pslice.num_samples();<a name="line.529"></a>
+<span class="sourceLineNo">530</span>    }<a name="line.530"></a>
+<span class="sourceLineNo">531</span><a name="line.531"></a>
+<span class="sourceLineNo">532</span>    String line = " line=" + FileIO.get_linenum();<a name="line.532"></a>
+<span class="sourceLineNo">533</span><a name="line.533"></a>
+<span class="sourceLineNo">534</span>    debugTrack.fine(<a name="line.534"></a>
+<span class="sourceLineNo">535</span>        class_str<a name="line.535"></a>
+<span class="sourceLineNo">536</span>            + ": "<a name="line.536"></a>
+<span class="sourceLineNo">537</span>            + ((ppt == null) ? "null" : ppt.name())<a name="line.537"></a>
+<span class="sourceLineNo">538</span>            + samp_str<a name="line.538"></a>
+<span class="sourceLineNo">539</span>            + line<a name="line.539"></a>
+<span class="sourceLineNo">540</span>            + ": "<a name="line.540"></a>
+<span class="sourceLineNo">541</span>            + vars<a name="line.541"></a>
+<span class="sourceLineNo">542</span>            + msg);<a name="line.542"></a>
+<span class="sourceLineNo">543</span>    if (dkconfig_showTraceback) {<a name="line.543"></a>
+<span class="sourceLineNo">544</span>      Throwable stack = new Throwable("debug traceback");<a name="line.544"></a>
+<span class="sourceLineNo">545</span>      stack.fillInStackTrace();<a name="line.545"></a>
+<span class="sourceLineNo">546</span>      stack.printStackTrace();<a name="line.546"></a>
+<span class="sourceLineNo">547</span>    }<a name="line.547"></a>
+<span class="sourceLineNo">548</span><a name="line.548"></a>
+<span class="sourceLineNo">549</span>    return true;<a name="line.549"></a>
+<span class="sourceLineNo">550</span>  }<a name="line.550"></a>
+<span class="sourceLineNo">551</span><a name="line.551"></a>
+<span class="sourceLineNo">552</span>  /** Returns whether or not the specified class matches the classes being tracked. */<a name="line.552"></a>
+<span class="sourceLineNo">553</span>  public static boolean class_match(@Nullable Class&lt;?&gt; inv_class) {<a name="line.553"></a>
+<span class="sourceLineNo">554</span><a name="line.554"></a>
+<span class="sourceLineNo">555</span>    if ((debugTrackClass.length &gt; 0) &amp;&amp; (inv_class != null)) {<a name="line.555"></a>
+<span class="sourceLineNo">556</span>      return (strContainsElem(inv_class.getName(), debugTrackClass));<a name="line.556"></a>
+<span class="sourceLineNo">557</span>    }<a name="line.557"></a>
+<span class="sourceLineNo">558</span>    return true;<a name="line.558"></a>
+<span class="sourceLineNo">559</span>  }<a name="line.559"></a>
+<span class="sourceLineNo">560</span><a name="line.560"></a>
+<span class="sourceLineNo">561</span>  /** Returns whether or not the specified ppt matches the ppts being tracked. */<a name="line.561"></a>
+<span class="sourceLineNo">562</span>  public static boolean ppt_match(<a name="line.562"></a>
+<span class="sourceLineNo">563</span>      @Nullable @UnknownInitialization(daikon.PptTopLevel.class) Ppt ppt) {<a name="line.563"></a>
+<span class="sourceLineNo">564</span><a name="line.564"></a>
+<span class="sourceLineNo">565</span>    if (debugTrackPpt.length &gt; 0) {<a name="line.565"></a>
+<span class="sourceLineNo">566</span>      return ((ppt != null) &amp;&amp; strContainsElem(ppt.name(), debugTrackPpt));<a name="line.566"></a>
+<span class="sourceLineNo">567</span>    }<a name="line.567"></a>
+<span class="sourceLineNo">568</span>    return true;<a name="line.568"></a>
+<span class="sourceLineNo">569</span>  }<a name="line.569"></a>
+<span class="sourceLineNo">570</span><a name="line.570"></a>
+<span class="sourceLineNo">571</span>  /**<a name="line.571"></a>
+<span class="sourceLineNo">572</span>   * Returns whether or not the specified vars match the ones being tracked. Also, sets<a name="line.572"></a>
+<span class="sourceLineNo">573</span>   * Debug.ourvars with the names of the variables matched if they are not the leader of their<a name="line.573"></a>
+<span class="sourceLineNo">574</span>   * equality sets.<a name="line.574"></a>
+<span class="sourceLineNo">575</span>   */<a name="line.575"></a>
+<span class="sourceLineNo">576</span>  public static boolean var_match(VarInfo @Nullable [] vis) {<a name="line.576"></a>
+<span class="sourceLineNo">577</span><a name="line.577"></a>
+<span class="sourceLineNo">578</span>    if (debugTrackVars.length == 0) {<a name="line.578"></a>
+<span class="sourceLineNo">579</span>      return true;<a name="line.579"></a>
+<span class="sourceLineNo">580</span>    }<a name="line.580"></a>
+<span class="sourceLineNo">581</span>    if (vis == null) {<a name="line.581"></a>
+<span class="sourceLineNo">582</span>      return false;<a name="line.582"></a>
+<span class="sourceLineNo">583</span>    }<a name="line.583"></a>
+<span class="sourceLineNo">584</span><a name="line.584"></a>
+<span class="sourceLineNo">585</span>    boolean match = false;<a name="line.585"></a>
+<span class="sourceLineNo">586</span><a name="line.586"></a>
+<span class="sourceLineNo">587</span>    // Loop through each set of specified debug variables.<a name="line.587"></a>
+<span class="sourceLineNo">588</span>    outer:<a name="line.588"></a>
+<span class="sourceLineNo">589</span>    for (String[] cv : debugTrackVars) {<a name="line.589"></a>
+<span class="sourceLineNo">590</span>      if (cv.length != vis.length) {<a name="line.590"></a>
+<span class="sourceLineNo">591</span>        continue;<a name="line.591"></a>
+<span class="sourceLineNo">592</span>      }<a name="line.592"></a>
+<span class="sourceLineNo">593</span>      for (int j = 0; j &lt; ourvars.length; j++) {<a name="line.593"></a>
+<span class="sourceLineNo">594</span>        ourvars[j] = null;<a name="line.594"></a>
+<span class="sourceLineNo">595</span>      }<a name="line.595"></a>
+<span class="sourceLineNo">596</span><a name="line.596"></a>
+<span class="sourceLineNo">597</span>      // Flags to insure that we don't match a variable more than once<a name="line.597"></a>
+<span class="sourceLineNo">598</span>      boolean[] used = {false, false, false};<a name="line.598"></a>
+<span class="sourceLineNo">599</span><a name="line.599"></a>
+<span class="sourceLineNo">600</span>      // Loop through each variable in this set of debug variables<a name="line.600"></a>
+<span class="sourceLineNo">601</span>      for (int j = 0; j &lt; cv.length; j++) {<a name="line.601"></a>
+<span class="sourceLineNo">602</span>        boolean this_match = false;<a name="line.602"></a>
+<span class="sourceLineNo">603</span><a name="line.603"></a>
+<span class="sourceLineNo">604</span>        // Loop through each variable at this point<a name="line.604"></a>
+<span class="sourceLineNo">605</span>        eachvis:<a name="line.605"></a>
+<span class="sourceLineNo">606</span>        for (int k = 0; k &lt; vis.length; k++) {<a name="line.606"></a>
+<span class="sourceLineNo">607</span><a name="line.607"></a>
+<span class="sourceLineNo">608</span>          // Get the matching equality set<a name="line.608"></a>
+<span class="sourceLineNo">609</span>          Set&lt;VarInfo&gt; evars = null;<a name="line.609"></a>
+<span class="sourceLineNo">610</span>          if (vis[k].equalitySet != null) {<a name="line.610"></a>
+<span class="sourceLineNo">611</span>            evars = vis[k].equalitySet.getVars();<a name="line.611"></a>
+<span class="sourceLineNo">612</span>          }<a name="line.612"></a>
+<span class="sourceLineNo">613</span><a name="line.613"></a>
+<span class="sourceLineNo">614</span>          // If there is an equality set<a name="line.614"></a>
+<span class="sourceLineNo">615</span>          if ((evars != null) &amp;&amp; vis[k].isCanonical()) {<a name="line.615"></a>
+<span class="sourceLineNo">616</span><a name="line.616"></a>
+<span class="sourceLineNo">617</span>            // Loop through each variable in the equality set<a name="line.617"></a>
+<span class="sourceLineNo">618</span>            for (VarInfo v : evars) {<a name="line.618"></a>
+<span class="sourceLineNo">619</span>              if (!used[k] &amp;&amp; (cv[j].equals("*") || cv[j].equals(v.name()))) {<a name="line.619"></a>
+<span class="sourceLineNo">620</span>                used[k] = true;<a name="line.620"></a>
+<span class="sourceLineNo">621</span>                this_match = true;<a name="line.621"></a>
+<span class="sourceLineNo">622</span>                if (!cv[j].equals(vis[j].name())) {<a name="line.622"></a>
+<span class="sourceLineNo">623</span>                  ourvars[j] = v.name();<a name="line.623"></a>
+<span class="sourceLineNo">624</span>                  if (j != k) ourvars[j] += " (" + j + "/" + k + ")";<a name="line.624"></a>
+<span class="sourceLineNo">625</span>                  if (v.isCanonical()) ourvars[j] += " (Leader)";<a name="line.625"></a>
+<span class="sourceLineNo">626</span>                }<a name="line.626"></a>
+<span class="sourceLineNo">627</span>                break eachvis;<a name="line.627"></a>
+<span class="sourceLineNo">628</span>              }<a name="line.628"></a>
+<span class="sourceLineNo">629</span>            }<a name="line.629"></a>
+<span class="sourceLineNo">630</span>          } else { // sometimes, no equality set<a name="line.630"></a>
+<span class="sourceLineNo">631</span>            if (cv[j].equals("*") || cv[j].equals(vis[k].name())) this_match = true;<a name="line.631"></a>
+<span class="sourceLineNo">632</span>          }<a name="line.632"></a>
+<span class="sourceLineNo">633</span>        }<a name="line.633"></a>
+<span class="sourceLineNo">634</span>        if (!this_match) continue outer;<a name="line.634"></a>
+<span class="sourceLineNo">635</span>      }<a name="line.635"></a>
+<span class="sourceLineNo">636</span>      match = true;<a name="line.636"></a>
+<span class="sourceLineNo">637</span>      break outer;<a name="line.637"></a>
+<span class="sourceLineNo">638</span>    }<a name="line.638"></a>
+<span class="sourceLineNo">639</span><a name="line.639"></a>
+<span class="sourceLineNo">640</span>    return match;<a name="line.640"></a>
+<span class="sourceLineNo">641</span>  }<a name="line.641"></a>
+<span class="sourceLineNo">642</span><a name="line.642"></a>
+<span class="sourceLineNo">643</span>  /** Looks for an element in arr that is a substring of str. */<a name="line.643"></a>
+<span class="sourceLineNo">644</span>  private static boolean strContainsElem(String str, String[] arr) {<a name="line.644"></a>
+<span class="sourceLineNo">645</span><a name="line.645"></a>
+<span class="sourceLineNo">646</span>    for (String elt : arr) {<a name="line.646"></a>
+<span class="sourceLineNo">647</span>      if (str.indexOf(elt) &gt;= 0) {<a name="line.647"></a>
+<span class="sourceLineNo">648</span>        return true;<a name="line.648"></a>
+<span class="sourceLineNo">649</span>      }<a name="line.649"></a>
+<span class="sourceLineNo">650</span>    }<a name="line.650"></a>
+<span class="sourceLineNo">651</span>    return false;<a name="line.651"></a>
+<span class="sourceLineNo">652</span>  }<a name="line.652"></a>
+<span class="sourceLineNo">653</span><a name="line.653"></a>
+<span class="sourceLineNo">654</span>  /**<a name="line.654"></a>
+<span class="sourceLineNo">655</span>   * Looks through entire ppt tree and checks for any items we are interested in. If found, prints<a name="line.655"></a>
+<span class="sourceLineNo">656</span>   * them out.<a name="line.656"></a>
+<span class="sourceLineNo">657</span>   */<a name="line.657"></a>
+<span class="sourceLineNo">658</span>  public static void check(PptMap all_ppts, String msg) {<a name="line.658"></a>
+<span class="sourceLineNo">659</span><a name="line.659"></a>
+<span class="sourceLineNo">660</span>    boolean found = false;<a name="line.660"></a>
+<span class="sourceLineNo">661</span><a name="line.661"></a>
+<span class="sourceLineNo">662</span>    for (PptTopLevel ppt : all_ppts.ppt_all_iterable()) {<a name="line.662"></a>
+<span class="sourceLineNo">663</span>      if (ppt_match(ppt)) debugTrack.fine("Matched ppt '" + ppt.name() + "' at " + msg);<a name="line.663"></a>
+<span class="sourceLineNo">664</span>      for (PptSlice slice : ppt.views_iterable()) {<a name="line.664"></a>
+<span class="sourceLineNo">665</span>        for (int k = 0; k &lt; slice.invs.size(); k++) {<a name="line.665"></a>
+<span class="sourceLineNo">666</span>          Invariant inv = slice.invs.get(k);<a name="line.666"></a>
+<span class="sourceLineNo">667</span>          if (inv.log("%s: found #%s=%s in slice %s", msg, k, inv.format(), slice)) found = true;<a name="line.667"></a>
+<span class="sourceLineNo">668</span>        }<a name="line.668"></a>
+<span class="sourceLineNo">669</span>      }<a name="line.669"></a>
+<span class="sourceLineNo">670</span>    }<a name="line.670"></a>
+<span class="sourceLineNo">671</span>    if (!found) debugTrack.fine("Found no points at '" + msg + "'");<a name="line.671"></a>
+<span class="sourceLineNo">672</span>  }<a name="line.672"></a>
+<span class="sourceLineNo">673</span><a name="line.673"></a>
+<span class="sourceLineNo">674</span>  /** Returns a string containing the integer variables and their values. */<a name="line.674"></a>
+<span class="sourceLineNo">675</span>  public static String int_vars(PptTopLevel ppt, ValueTuple vt) {<a name="line.675"></a>
+<span class="sourceLineNo">676</span><a name="line.676"></a>
+<span class="sourceLineNo">677</span>    String out = "";<a name="line.677"></a>
+<span class="sourceLineNo">678</span><a name="line.678"></a>
+<span class="sourceLineNo">679</span>    for (VarInfo v : ppt.var_infos) {<a name="line.679"></a>
+<span class="sourceLineNo">680</span>      if (!v.isCanonical()) {<a name="line.680"></a>
+<span class="sourceLineNo">681</span>        continue;<a name="line.681"></a>
+<span class="sourceLineNo">682</span>      }<a name="line.682"></a>
+<span class="sourceLineNo">683</span>      if (v.file_rep_type != ProglangType.INT) {<a name="line.683"></a>
+<span class="sourceLineNo">684</span>        continue;<a name="line.684"></a>
+<span class="sourceLineNo">685</span>      }<a name="line.685"></a>
+<span class="sourceLineNo">686</span>      out += v.name() + "=" + toString(v.getValueOrNull(vt)) + " [" + vt.getModified(v) + "]: ";<a name="line.686"></a>
+<span class="sourceLineNo">687</span>    }<a name="line.687"></a>
+<span class="sourceLineNo">688</span>    return out;<a name="line.688"></a>
+<span class="sourceLineNo">689</span>  }<a name="line.689"></a>
+<span class="sourceLineNo">690</span><a name="line.690"></a>
+<span class="sourceLineNo">691</span>  /**<a name="line.691"></a>
+<span class="sourceLineNo">692</span>   * Returns a string containing the variable values for any variables that are currently being<a name="line.692"></a>
+<span class="sourceLineNo">693</span>   * tracked in ppt. The string is of the form 'v1 = val1: v2 = val2, etc.<a name="line.693"></a>
+<span class="sourceLineNo">694</span>   */<a name="line.694"></a>
+<span class="sourceLineNo">695</span>  public static String related_vars(PptTopLevel ppt, ValueTuple vt) {<a name="line.695"></a>
+<span class="sourceLineNo">696</span><a name="line.696"></a>
+<span class="sourceLineNo">697</span>    String out = "";<a name="line.697"></a>
+<span class="sourceLineNo">698</span><a name="line.698"></a>
+<span class="sourceLineNo">699</span>    for (VarInfo v : ppt.var_infos) {<a name="line.699"></a>
+<span class="sourceLineNo">700</span>      for (String[] cv : debugTrackVars) {<a name="line.700"></a>
+<span class="sourceLineNo">701</span>        for (String cv_elt : cv) {<a name="line.701"></a>
+<span class="sourceLineNo">702</span>          if (cv_elt.equals(v.name())) {<a name="line.702"></a>
+<span class="sourceLineNo">703</span>            Object val = v.getValue(vt);<a name="line.703"></a>
+<span class="sourceLineNo">704</span>            int mod = vt.getModified(v);<a name="line.704"></a>
+<span class="sourceLineNo">705</span>            out += v.name() + "=";<a name="line.705"></a>
+<span class="sourceLineNo">706</span>            out += toString(val);<a name="line.706"></a>
+<span class="sourceLineNo">707</span>            if ((mod == ValueTuple.MISSING_FLOW) || (mod == ValueTuple.MISSING_NONSENSICAL)) {<a name="line.707"></a>
+<span class="sourceLineNo">708</span>              out += " (missing)";<a name="line.708"></a>
+<span class="sourceLineNo">709</span>            }<a name="line.709"></a>
+<span class="sourceLineNo">710</span>            if (v.missingOutOfBounds()) out += " (out of bounds)";<a name="line.710"></a>
+<span class="sourceLineNo">711</span>            if (v.equalitySet != null) {<a name="line.711"></a>
+<span class="sourceLineNo">712</span>              if (!v.isCanonical()) out += " (leader=" + v.canonicalRep().name() + ")";<a name="line.712"></a>
+<span class="sourceLineNo">713</span>            }<a name="line.713"></a>
+<span class="sourceLineNo">714</span>            // out += " mod=" + mod;<a name="line.714"></a>
+<span class="sourceLineNo">715</span>            out += ": ";<a name="line.715"></a>
+<span class="sourceLineNo">716</span>          }<a name="line.716"></a>
+<span class="sourceLineNo">717</span>        }<a name="line.717"></a>
+<span class="sourceLineNo">718</span>      }<a name="line.718"></a>
+<span class="sourceLineNo">719</span>    }<a name="line.719"></a>
+<span class="sourceLineNo">720</span><a name="line.720"></a>
+<span class="sourceLineNo">721</span>    return out;<a name="line.721"></a>
+<span class="sourceLineNo">722</span>  }<a name="line.722"></a>
+<span class="sourceLineNo">723</span><a name="line.723"></a>
+<span class="sourceLineNo">724</span>  /** Like Object.toString(), but handles null, and has special handling for arrays. */<a name="line.724"></a>
+<span class="sourceLineNo">725</span>  public static String toString(@Nullable Object val) {<a name="line.725"></a>
+<span class="sourceLineNo">726</span>    if (val == null) {<a name="line.726"></a>
+<span class="sourceLineNo">727</span>      return "none";<a name="line.727"></a>
+<span class="sourceLineNo">728</span>    }<a name="line.728"></a>
+<span class="sourceLineNo">729</span>    if (val instanceof String) {<a name="line.729"></a>
+<span class="sourceLineNo">730</span>      return "\"" + val + "\"";<a name="line.730"></a>
+<span class="sourceLineNo">731</span>    }<a name="line.731"></a>
+<span class="sourceLineNo">732</span>    if (val instanceof VarInfo[]) {<a name="line.732"></a>
+<span class="sourceLineNo">733</span>      return Arrays.toString((VarInfo[]) val);<a name="line.733"></a>
+<span class="sourceLineNo">734</span>    }<a name="line.734"></a>
+<span class="sourceLineNo">735</span>    if (val instanceof String[]) {<a name="line.735"></a>
+<span class="sourceLineNo">736</span>      return Arrays.toString((String[]) val);<a name="line.736"></a>
+<span class="sourceLineNo">737</span>    }<a name="line.737"></a>
+<span class="sourceLineNo">738</span>    if (val instanceof boolean[]) {<a name="line.738"></a>
+<span class="sourceLineNo">739</span>      return Arrays.toString((boolean[]) val);<a name="line.739"></a>
+<span class="sourceLineNo">740</span>    }<a name="line.740"></a>
+<span class="sourceLineNo">741</span>    if (val instanceof byte[]) {<a name="line.741"></a>
+<span class="sourceLineNo">742</span>      return Arrays.toString((byte[]) val);<a name="line.742"></a>
+<span class="sourceLineNo">743</span>    }<a name="line.743"></a>
+<span class="sourceLineNo">744</span>    if (val instanceof char[]) {<a name="line.744"></a>
+<span class="sourceLineNo">745</span>      return Arrays.toString((char[]) val);<a name="line.745"></a>
+<span class="sourceLineNo">746</span>    }<a name="line.746"></a>
+<span class="sourceLineNo">747</span>    if (val instanceof double[]) {<a name="line.747"></a>
+<span class="sourceLineNo">748</span>      return Arrays.toString((double[]) val);<a name="line.748"></a>
+<span class="sourceLineNo">749</span>    }<a name="line.749"></a>
+<span class="sourceLineNo">750</span>    if (val instanceof float[]) {<a name="line.750"></a>
+<span class="sourceLineNo">751</span>      return Arrays.toString((float[]) val);<a name="line.751"></a>
+<span class="sourceLineNo">752</span>    }<a name="line.752"></a>
+<span class="sourceLineNo">753</span>    if (val instanceof int[]) {<a name="line.753"></a>
+<span class="sourceLineNo">754</span>      return Arrays.toString((int[]) val);<a name="line.754"></a>
+<span class="sourceLineNo">755</span>    }<a name="line.755"></a>
+<span class="sourceLineNo">756</span>    if (val instanceof long[]) {<a name="line.756"></a>
+<span class="sourceLineNo">757</span>      return Arrays.toString((long[]) val);<a name="line.757"></a>
+<span class="sourceLineNo">758</span>    }<a name="line.758"></a>
+<span class="sourceLineNo">759</span>    if (val instanceof short[]) {<a name="line.759"></a>
+<span class="sourceLineNo">760</span>      return Arrays.toString((short[]) val);<a name="line.760"></a>
+<span class="sourceLineNo">761</span>    }<a name="line.761"></a>
+<span class="sourceLineNo">762</span>    return val.toString();<a name="line.762"></a>
+<span class="sourceLineNo">763</span>  }<a name="line.763"></a>
+<span class="sourceLineNo">764</span><a name="line.764"></a>
+<span class="sourceLineNo">765</span>  /**<a name="line.765"></a>
+<span class="sourceLineNo">766</span>   * Returns a string containing each variable and its value.<a name="line.766"></a>
+<span class="sourceLineNo">767</span>   *<a name="line.767"></a>
+<span class="sourceLineNo">768</span>   * &lt;p&gt;The string is of the form "v1 = val1: v2 = val2, ...".<a name="line.768"></a>
+<span class="sourceLineNo">769</span>   */<a name="line.769"></a>
+<span class="sourceLineNo">770</span>  public static String toString(VarInfo[] vis, ValueTuple vt) {<a name="line.770"></a>
+<span class="sourceLineNo">771</span><a name="line.771"></a>
+<span class="sourceLineNo">772</span>    StringBuilder out = new StringBuilder();<a name="line.772"></a>
+<span class="sourceLineNo">773</span><a name="line.773"></a>
+<span class="sourceLineNo">774</span>    for (VarInfo v : vis) {<a name="line.774"></a>
+<span class="sourceLineNo">775</span>      Object val = v.getValue(vt);<a name="line.775"></a>
+<span class="sourceLineNo">776</span>      // int mod = vt.getModified(v);<a name="line.776"></a>
+<span class="sourceLineNo">777</span>      out.append(v.name());<a name="line.777"></a>
+<span class="sourceLineNo">778</span>      out.append("=");<a name="line.778"></a>
+<span class="sourceLineNo">779</span>      out.append(toString(val));<a name="line.779"></a>
+<span class="sourceLineNo">780</span>      if (v.isMissing(vt)) out.append(" (missing)");<a name="line.780"></a>
+<span class="sourceLineNo">781</span>      if (v.missingOutOfBounds()) out.append(" (out of bounds)");<a name="line.781"></a>
+<span class="sourceLineNo">782</span>      if (v.equalitySet != null) {<a name="line.782"></a>
+<span class="sourceLineNo">783</span>        if (!v.isCanonical()) out.append(" (leader=" + v.canonicalRep().name() + ")");<a name="line.783"></a>
+<span class="sourceLineNo">784</span>      }<a name="line.784"></a>
+<span class="sourceLineNo">785</span>      out.append(": ");<a name="line.785"></a>
+<span class="sourceLineNo">786</span>    }<a name="line.786"></a>
+<span class="sourceLineNo">787</span><a name="line.787"></a>
+<span class="sourceLineNo">788</span>    return out.toString();<a name="line.788"></a>
+<span class="sourceLineNo">789</span>  }<a name="line.789"></a>
+<span class="sourceLineNo">790</span><a name="line.790"></a>
+<span class="sourceLineNo">791</span>  /**<a name="line.791"></a>
+<span class="sourceLineNo">792</span>   * Parses the specified argument to {@code --track} and sets up the track arrays accordingly. The<a name="line.792"></a>
+<span class="sourceLineNo">793</span>   * syntax of the argument is<a name="line.793"></a>
+<span class="sourceLineNo">794</span>   *<a name="line.794"></a>
+<span class="sourceLineNo">795</span>   * &lt;pre&gt;{@code class|class|...&lt;var,var,var&gt;@ppt}&lt;/pre&gt;<a name="line.795"></a>
+<span class="sourceLineNo">796</span>   *<a name="line.796"></a>
+<span class="sourceLineNo">797</span>   * As shown, multiple class arguments can be specified separated by pipe symbols (|). The<a name="line.797"></a>
+<span class="sourceLineNo">798</span>   * variables are specified in angle brackets (&amp;lt;&amp;gt;) and the program point is preceeded by an<a name="line.798"></a>
+<span class="sourceLineNo">799</span>   * at sign (@). Each is optional and can be left out. The add_track routine can be called multiple<a name="line.799"></a>
+<span class="sourceLineNo">800</span>   * times. An invariant that matches any of the specifications will be tracked.<a name="line.800"></a>
+<span class="sourceLineNo">801</span>   */<a name="line.801"></a>
+<span class="sourceLineNo">802</span>  public static @Nullable String add_track(String def) {<a name="line.802"></a>
+<span class="sourceLineNo">803</span><a name="line.803"></a>
+<span class="sourceLineNo">804</span>    String classes = null;<a name="line.804"></a>
+<span class="sourceLineNo">805</span>    String vars = null;<a name="line.805"></a>
+<span class="sourceLineNo">806</span>    String ppt = null;<a name="line.806"></a>
+<span class="sourceLineNo">807</span><a name="line.807"></a>
+<span class="sourceLineNo">808</span>    // Get the classes, vars, and ppt<a name="line.808"></a>
+<span class="sourceLineNo">809</span>    int var_start = def.indexOf('&lt;');<a name="line.809"></a>
+<span class="sourceLineNo">810</span>    int ppt_start = def.indexOf("@");<a name="line.810"></a>
+<span class="sourceLineNo">811</span>    if ((var_start == -1) &amp;&amp; (ppt_start == -1)) {<a name="line.811"></a>
+<span class="sourceLineNo">812</span>      classes = def;<a name="line.812"></a>
+<span class="sourceLineNo">813</span>    } else if (var_start != -1) {<a name="line.813"></a>
+<span class="sourceLineNo">814</span>      if (var_start &gt; 0) classes = def.substring(0, var_start);<a name="line.814"></a>
+<span class="sourceLineNo">815</span>      if (ppt_start == -1) {<a name="line.815"></a>
+<span class="sourceLineNo">816</span>        vars = def.substring(var_start + 1, def.length() - 1);<a name="line.816"></a>
+<span class="sourceLineNo">817</span>      } else {<a name="line.817"></a>
+<span class="sourceLineNo">818</span>        vars = def.substring(var_start + 1, ppt_start - 1);<a name="line.818"></a>
+<span class="sourceLineNo">819</span>        ppt = def.substring(ppt_start + 1, def.length());<a name="line.819"></a>
+<span class="sourceLineNo">820</span>      }<a name="line.820"></a>
+<span class="sourceLineNo">821</span>    } else {<a name="line.821"></a>
+<span class="sourceLineNo">822</span>      if (ppt_start &gt; 0) classes = def.substring(0, ppt_start);<a name="line.822"></a>
+<span class="sourceLineNo">823</span>      ppt = def.substring(ppt_start + 1, def.length());<a name="line.823"></a>
+<span class="sourceLineNo">824</span>    }<a name="line.824"></a>
+<span class="sourceLineNo">825</span><a name="line.825"></a>
+<span class="sourceLineNo">826</span>    // If classes were specified, get each class<a name="line.826"></a>
+<span class="sourceLineNo">827</span>    if (classes != null) {<a name="line.827"></a>
+<span class="sourceLineNo">828</span>      String[] class_arr = classes.split("\\|");<a name="line.828"></a>
+<span class="sourceLineNo">829</span>      debugTrackClass = ArraysPlume.concat(debugTrackClass, class_arr);<a name="line.829"></a>
+<span class="sourceLineNo">830</span>    }<a name="line.830"></a>
+<span class="sourceLineNo">831</span><a name="line.831"></a>
+<span class="sourceLineNo">832</span>    // If vars were specified, get each var<a name="line.832"></a>
+<span class="sourceLineNo">833</span>    if (vars != null) {<a name="line.833"></a>
+<span class="sourceLineNo">834</span>      String[] var_arr = vars.split(", *");<a name="line.834"></a>
+<span class="sourceLineNo">835</span>      String[][] new_var = new String[debugTrackVars.length + 1][];<a name="line.835"></a>
+<span class="sourceLineNo">836</span>      for (int ii = 0; ii &lt; debugTrackVars.length; ii++) {<a name="line.836"></a>
+<span class="sourceLineNo">837</span>        new_var[ii] = debugTrackVars[ii];<a name="line.837"></a>
+<span class="sourceLineNo">838</span>      }<a name="line.838"></a>
+<span class="sourceLineNo">839</span>      new_var[debugTrackVars.length] = var_arr;<a name="line.839"></a>
+<span class="sourceLineNo">840</span>      debugTrackVars = new_var;<a name="line.840"></a>
+<span class="sourceLineNo">841</span>    }<a name="line.841"></a>
+<span class="sourceLineNo">842</span><a name="line.842"></a>
+<span class="sourceLineNo">843</span>    // if a ppt was specified, add it to the array of tracked ppts<a name="line.843"></a>
+<span class="sourceLineNo">844</span>    if (ppt != null) {<a name="line.844"></a>
+<span class="sourceLineNo">845</span>      String[] newPpt = new String[] {ppt};<a name="line.845"></a>
+<span class="sourceLineNo">846</span>      debugTrackPpt = ArraysPlume.concat(debugTrackPpt, newPpt);<a name="line.846"></a>
+<span class="sourceLineNo">847</span>    }<a name="line.847"></a>
+<span class="sourceLineNo">848</span><a name="line.848"></a>
+<span class="sourceLineNo">849</span>    System.out.println();<a name="line.849"></a>
+<span class="sourceLineNo">850</span>    debugTrack.fine("After --track: " + def);<a name="line.850"></a>
+<span class="sourceLineNo">851</span>    debugTrack.fine("Track Classes: " + ArraysPlume.toString(debugTrackClass, false));<a name="line.851"></a>
+<span class="sourceLineNo">852</span>    String vars_out = "";<a name="line.852"></a>
+<span class="sourceLineNo">853</span>    for (int ii = 0; ii &lt; debugTrackVars.length; ii++) {<a name="line.853"></a>
+<span class="sourceLineNo">854</span>      vars_out += Arrays.toString(debugTrackVars[ii]) + " ";<a name="line.854"></a>
+<span class="sourceLineNo">855</span>    }<a name="line.855"></a>
+<span class="sourceLineNo">856</span>    debugTrack.fine("Track Vars: " + vars_out);<a name="line.856"></a>
+<span class="sourceLineNo">857</span>    debugTrack.fine("Track Ppts: " + ArraysPlume.toString(debugTrackPpt, false));<a name="line.857"></a>
+<span class="sourceLineNo">858</span><a name="line.858"></a>
+<span class="sourceLineNo">859</span>    return null;<a name="line.859"></a>
+<span class="sourceLineNo">860</span>  }<a name="line.860"></a>
+<span class="sourceLineNo">861</span>}<a name="line.861"></a>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</pre>
+</div>
+</body>
+</html>

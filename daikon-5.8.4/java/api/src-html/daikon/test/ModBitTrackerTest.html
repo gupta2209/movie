@@ -1,0 +1,191 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<html lang="en">
+<head><link rel="icon" href="../../../daikon-favicon.png" type="image/png"/>
+<title>Source code</title>
+<link rel="stylesheet" type="text/css" href="../../../stylesheet.css" title="Style">
+</head>
+<body>
+<div class="sourceContainer">
+<pre><span class="sourceLineNo">001</span>package daikon.test;<a name="line.1"></a>
+<span class="sourceLineNo">002</span><a name="line.2"></a>
+<span class="sourceLineNo">003</span>import static org.junit.Assert.assertEquals;<a name="line.3"></a>
+<span class="sourceLineNo">004</span><a name="line.4"></a>
+<span class="sourceLineNo">005</span>import daikon.*;<a name="line.5"></a>
+<span class="sourceLineNo">006</span>import java.util.BitSet;<a name="line.6"></a>
+<span class="sourceLineNo">007</span>import java.util.Random;<a name="line.7"></a>
+<span class="sourceLineNo">008</span>import junit.framework.*;<a name="line.8"></a>
+<span class="sourceLineNo">009</span>import org.junit.BeforeClass;<a name="line.9"></a>
+<span class="sourceLineNo">010</span>import org.junit.Test;<a name="line.10"></a>
+<span class="sourceLineNo">011</span><a name="line.11"></a>
+<span class="sourceLineNo">012</span>public class ModBitTrackerTest {<a name="line.12"></a>
+<span class="sourceLineNo">013</span><a name="line.13"></a>
+<span class="sourceLineNo">014</span>  // Plan:<a name="line.14"></a>
+<span class="sourceLineNo">015</span>  // Create many different variables.  Give them a skewed distribution of<a name="line.15"></a>
+<span class="sourceLineNo">016</span>  // random modbits so that it takes them a while to separate.  In the end,<a name="line.16"></a>
+<span class="sourceLineNo">017</span>  // give them modbits so that they are all separated.  See if the results<a name="line.17"></a>
+<span class="sourceLineNo">018</span>  // are as they should be.<a name="line.18"></a>
+<span class="sourceLineNo">019</span><a name="line.19"></a>
+<span class="sourceLineNo">020</span>  // I should probably add some tests that test arguments other than 1 for<a name="line.20"></a>
+<span class="sourceLineNo">021</span>  // the "count" argument to ModBitTracker.add().<a name="line.21"></a>
+<span class="sourceLineNo">022</span><a name="line.22"></a>
+<span class="sourceLineNo">023</span>  private Random r = new Random(20031014L);<a name="line.23"></a>
+<span class="sourceLineNo">024</span><a name="line.24"></a>
+<span class="sourceLineNo">025</span>  @BeforeClass<a name="line.25"></a>
+<span class="sourceLineNo">026</span>  public static void setUpClass() {<a name="line.26"></a>
+<span class="sourceLineNo">027</span>    daikon.LogHelper.setupLogs(LogHelper.INFO);<a name="line.27"></a>
+<span class="sourceLineNo">028</span>    FileIO.new_decl_format = true;<a name="line.28"></a>
+<span class="sourceLineNo">029</span>  }<a name="line.29"></a>
+<span class="sourceLineNo">030</span><a name="line.30"></a>
+<span class="sourceLineNo">031</span>  private ModBitTracker makeModBitTracker(BitSet[] bitsets) {<a name="line.31"></a>
+<span class="sourceLineNo">032</span>    int numvars = bitsets.length;<a name="line.32"></a>
+<span class="sourceLineNo">033</span>    int numsamples = bitsets[0].size();<a name="line.33"></a>
+<span class="sourceLineNo">034</span><a name="line.34"></a>
+<span class="sourceLineNo">035</span>    ModBitTracker result = new ModBitTracker(numvars);<a name="line.35"></a>
+<span class="sourceLineNo">036</span><a name="line.36"></a>
+<span class="sourceLineNo">037</span>    Object[] vals = new Object[numvars];<a name="line.37"></a>
+<span class="sourceLineNo">038</span>    int[] mods = new int[numvars];<a name="line.38"></a>
+<span class="sourceLineNo">039</span>    // We'll reuse this ValueTuple throughout, side-effecting its mods array.<a name="line.39"></a>
+<span class="sourceLineNo">040</span>    ValueTuple vt = ValueTuple.makeUninterned(vals, mods);<a name="line.40"></a>
+<span class="sourceLineNo">041</span>    for (int sampleno = 0; sampleno &lt; numsamples; sampleno++) {<a name="line.41"></a>
+<span class="sourceLineNo">042</span>      for (int var = 0; var &lt; numvars; var++) {<a name="line.42"></a>
+<span class="sourceLineNo">043</span>        mods[var] = booleanToModBit(bitsets[var].get(sampleno));<a name="line.43"></a>
+<span class="sourceLineNo">044</span>      }<a name="line.44"></a>
+<span class="sourceLineNo">045</span>      result.add(vt, 1);<a name="line.45"></a>
+<span class="sourceLineNo">046</span>    }<a name="line.46"></a>
+<span class="sourceLineNo">047</span>    return result;<a name="line.47"></a>
+<span class="sourceLineNo">048</span>  }<a name="line.48"></a>
+<span class="sourceLineNo">049</span><a name="line.49"></a>
+<span class="sourceLineNo">050</span>  private void checkModBitTracker(ModBitTracker mbt, BitSet[] bitsets) {<a name="line.50"></a>
+<span class="sourceLineNo">051</span>    int numvars = bitsets.length;<a name="line.51"></a>
+<span class="sourceLineNo">052</span>    int numsamples = bitsets[0].size();<a name="line.52"></a>
+<span class="sourceLineNo">053</span><a name="line.53"></a>
+<span class="sourceLineNo">054</span>    assertEquals(numvars, mbt.num_vars());<a name="line.54"></a>
+<span class="sourceLineNo">055</span>    assertEquals(numsamples, mbt.num_samples());<a name="line.55"></a>
+<span class="sourceLineNo">056</span><a name="line.56"></a>
+<span class="sourceLineNo">057</span>    for (int i = 0; i &lt; numvars; i++) {<a name="line.57"></a>
+<span class="sourceLineNo">058</span>      assertEquals(mbt.get(i), bitsets[i]);<a name="line.58"></a>
+<span class="sourceLineNo">059</span>    }<a name="line.59"></a>
+<span class="sourceLineNo">060</span>  }<a name="line.60"></a>
+<span class="sourceLineNo">061</span><a name="line.61"></a>
+<span class="sourceLineNo">062</span>  private int booleanToModBit(boolean b) {<a name="line.62"></a>
+<span class="sourceLineNo">063</span>    return (b ? ValueTuple.MODIFIED : ValueTuple.MISSING_NONSENSICAL);<a name="line.63"></a>
+<span class="sourceLineNo">064</span>  }<a name="line.64"></a>
+<span class="sourceLineNo">065</span><a name="line.65"></a>
+<span class="sourceLineNo">066</span>  private boolean randomModBoolean(int varno, int sampleno) {<a name="line.66"></a>
+<span class="sourceLineNo">067</span>    boolean unusual = (r.nextInt(100) == 0);<a name="line.67"></a>
+<span class="sourceLineNo">068</span>    boolean result;<a name="line.68"></a>
+<span class="sourceLineNo">069</span>    if (varno % 2 == 0) {<a name="line.69"></a>
+<span class="sourceLineNo">070</span>      result = (varno % 2 == 0);<a name="line.70"></a>
+<span class="sourceLineNo">071</span>    } else {<a name="line.71"></a>
+<span class="sourceLineNo">072</span>      result = ((varno + sampleno) % 2 == 0);<a name="line.72"></a>
+<span class="sourceLineNo">073</span>    }<a name="line.73"></a>
+<span class="sourceLineNo">074</span>    if (unusual) {<a name="line.74"></a>
+<span class="sourceLineNo">075</span>      result = !result;<a name="line.75"></a>
+<span class="sourceLineNo">076</span>    }<a name="line.76"></a>
+<span class="sourceLineNo">077</span>    return result;<a name="line.77"></a>
+<span class="sourceLineNo">078</span>  }<a name="line.78"></a>
+<span class="sourceLineNo">079</span><a name="line.79"></a>
+<span class="sourceLineNo">080</span>  // Make numvars different unique random BitSets, each of size<a name="line.80"></a>
+<span class="sourceLineNo">081</span>  // numsamples+numvars.  Then add duplicate_factor more BitSets (e.g., if<a name="line.81"></a>
+<span class="sourceLineNo">082</span>  // duplicate_factor is 1, then double the number of BitSets), where each<a name="line.82"></a>
+<span class="sourceLineNo">083</span>  // of the additional ones is a duplicate of one of the unique ones.<a name="line.83"></a>
+<span class="sourceLineNo">084</span><a name="line.84"></a>
+<span class="sourceLineNo">085</span>  BitSet[] makeBitSets(int numvars, int numsamples, double duplicate_factor) {<a name="line.85"></a>
+<span class="sourceLineNo">086</span>    int totalvars = (int) (numvars * (1 + duplicate_factor));<a name="line.86"></a>
+<span class="sourceLineNo">087</span>    BitSet[] result = new BitSet[totalvars];<a name="line.87"></a>
+<span class="sourceLineNo">088</span>    for (int var = 0; var &lt; numvars; var++) {<a name="line.88"></a>
+<span class="sourceLineNo">089</span>      BitSet bs = new BitSet(numsamples + numvars);<a name="line.89"></a>
+<span class="sourceLineNo">090</span>      for (int sample = 0; sample &lt; numsamples; sample++) {<a name="line.90"></a>
+<span class="sourceLineNo">091</span>        bs.set(sample, randomModBoolean(var, sample));<a name="line.91"></a>
+<span class="sourceLineNo">092</span>      }<a name="line.92"></a>
+<span class="sourceLineNo">093</span>      // add samples that make all the variables unique<a name="line.93"></a>
+<span class="sourceLineNo">094</span>      bs.set(numsamples + numvars - 1, false);<a name="line.94"></a>
+<span class="sourceLineNo">095</span>      bs.set(numsamples + var, true);<a name="line.95"></a>
+<span class="sourceLineNo">096</span>      result[var] = bs;<a name="line.96"></a>
+<span class="sourceLineNo">097</span>    }<a name="line.97"></a>
+<span class="sourceLineNo">098</span>    // Add duplicate BitSets.<a name="line.98"></a>
+<span class="sourceLineNo">099</span>    for (int var = numvars; var &lt; totalvars; var++) {<a name="line.99"></a>
+<span class="sourceLineNo">100</span>      result[var] = (BitSet) result[r.nextInt(numvars)].clone();<a name="line.100"></a>
+<span class="sourceLineNo">101</span>    }<a name="line.101"></a>
+<span class="sourceLineNo">102</span>    return result;<a name="line.102"></a>
+<span class="sourceLineNo">103</span>  }<a name="line.103"></a>
+<span class="sourceLineNo">104</span><a name="line.104"></a>
+<span class="sourceLineNo">105</span>  public void oneModBitTrackerTest(int vars, int samples, double duplicate_factor) {<a name="line.105"></a>
+<span class="sourceLineNo">106</span>    BitSet[] bitsets = makeBitSets(vars, samples, duplicate_factor);<a name="line.106"></a>
+<span class="sourceLineNo">107</span>    ModBitTracker mbt = makeModBitTracker(bitsets);<a name="line.107"></a>
+<span class="sourceLineNo">108</span>    checkModBitTracker(mbt, bitsets);<a name="line.108"></a>
+<span class="sourceLineNo">109</span>    assertEquals(vars, mbt.num_sets());<a name="line.109"></a>
+<span class="sourceLineNo">110</span>  }<a name="line.110"></a>
+<span class="sourceLineNo">111</span><a name="line.111"></a>
+<span class="sourceLineNo">112</span>  @Test<a name="line.112"></a>
+<span class="sourceLineNo">113</span>  public void testModBitTracker() {<a name="line.113"></a>
+<span class="sourceLineNo">114</span>    oneModBitTrackerTest(1, 2, 0.0);<a name="line.114"></a>
+<span class="sourceLineNo">115</span>    oneModBitTrackerTest(2, 2, 0.0);<a name="line.115"></a>
+<span class="sourceLineNo">116</span>    oneModBitTrackerTest(5, 10, 0.0);<a name="line.116"></a>
+<span class="sourceLineNo">117</span>    oneModBitTrackerTest(100, 1000, 5.0);<a name="line.117"></a>
+<span class="sourceLineNo">118</span>  }<a name="line.118"></a>
+<span class="sourceLineNo">119</span>}<a name="line.119"></a>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</pre>
+</div>
+</body>
+</html>
